@@ -243,7 +243,7 @@ def run_dino_experiment(cfg: Dict):
         print("Running WITHOUT wandb logging.")
 
 
-    data_root = str(cfg.get("resultsdata_root_root", "/home/anncollin/Desktop/Nucleoles/dataset/MyDB/"))
+    data_root = cfg["data_root"]
     device    = "cuda" if torch.cuda.is_available() else "cpu"
 
     image_size = int(cfg.get("image_size", 96))

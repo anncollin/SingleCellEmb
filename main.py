@@ -66,7 +66,7 @@ def load_config(path: str):
 #######################################################################################################
 def main():
     args = parse_args()
-    cfg = load_config(args.todo)
+    cfg  = load_config(args.todo)
 
     # ----------------------------------------------------------------------
     # AUTO-DETECT MACHINE AND INJECT THE CORRECT DATA ROOT
