@@ -1,0 +1,31 @@
+# Byte-compiled Python files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Cache and temp folders
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# VSCode settings
+.vscode/
+
+# Python-specific logs
+*.log
+
+# Weights & Biases logs
+wandb/
+
+# Custom ignored folders
+Results/
+

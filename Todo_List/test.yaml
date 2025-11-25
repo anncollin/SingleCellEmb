@@ -1,0 +1,44 @@
+experiment_name: "DINO_cells_p8"
+
+# Dataset
+image_size: 96
+in_channels: 2
+
+# ViT / DINO settings
+patch_size: 8
+out_dim: 768
+
+# Training
+batch_size: 16
+epochs: 5
+learning_rate: 1e-4
+weight_decay: 0.05
+num_workers: 4
+
+# DINO Multi-crop
+global_crops_scale: [0.4, 1.0]
+local_crops_scale: [0.1, 0.4]
+local_crops_number: 6
+
+# Augmentation settings
+augment:
+  elastic_p: 0.2
+  elastic_alpha_range: [20.0, 40.0]
+  elastic_sigma_range: [3.0, 5.0]
+
+  solarization_p: 0.1
+
+  equalize_p: 0.1
+
+  contrast_p: 0.2
+  contrast_range: [0.8, 1.2]
+
+  rotation_degrees: [-180, 180]        
+
+# EMA
+base_momentum: 0.996
+max_momentum: 1.0
+
+# Output
+results_root: "./Results/test"
+
