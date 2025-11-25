@@ -9,12 +9,8 @@ from torch.utils.data import Dataset
 # Add the path to: /home/anncollin/Desktop/Nucleoles/dataset/
 # so we can import createDB_utils.py
 # -------------------------------------------------------------------------
-CURRENT_DIR  = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
-
-DATASET_UTILS_DIR = os.path.join(PROJECT_ROOT, "Dataset")   
-
-sys.path.append(DATASET_UTILS_DIR)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(CURRENT_DIR)
 
 from createDB_utils import load_from_zip
 
