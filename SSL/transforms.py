@@ -1,50 +1,106 @@
 from typing import Dict, Tuple, List, Optional
 import random
 import torch
+import numpy as np
 import torchvision.transforms as T
-import torchvision.transforms.v2 as v2 
+import torchvision.transforms.functional as F
+import scipy.ndimage as ndi
 
 
+# -------------------------------------------------------------------------
+# SOLARIZATION (manual version, compatible with Torchvision 0.12)
+# -------------------------------------------------------------------------
 class Solarization(object):
-    def __init__(self, p: float):
+    def __init__(self, p: float, threshold: float = 0.5):
         self.p = p
-        # v2.RandomSolarize works with torch.Tensor and PIL Image
-        self.t = v2.RandomSolarize
+        self.threshold = threshold
 
     def __call__(self, img):
         if random.random() < self.p:
-            # threshold is a hyperparameter; 0.5 is a common choice on [0,1]-scaled images
-            return self.t(threshold=0.5)(img)
-        else:
-            return img
-        
+            # img is a Tensor scaled to [0,1]
+            return torch.where(img < self.threshold, img, 1 - img)
+        return img
+
+
+# -------------------------------------------------------------------------
+# ELASTIC DEFORMATION (classic implementation used in DINO papers)
+# -------------------------------------------------------------------------
 class ElasticDeformation(object):
-    def __init__(self,
-                 p: float,
+    def __init__(self, p: float,
                  alpha_range: Tuple[float, float],
                  sigma_range: Tuple[float, float]):
+
         self.p = p
         self.alpha_range = alpha_range
         self.sigma_range = sigma_range
-        self.t = v2.ElasticTransform
 
     def __call__(self, img):
-        if random.random() < self.p:
-            alpha = random.uniform(*self.alpha_range)
-            sigma = random.uniform(*self.sigma_range)
-            return self.t(alpha=alpha, sigma=sigma)(img)
-        else:
+        if random.random() >= self.p:
             return img
-        
+
+        # Convert torch tensor → numpy
+        img_np = img.numpy().transpose(1, 2, 0)
+
+        alpha = random.uniform(*self.alpha_range)
+        sigma = random.uniform(*self.sigma_range)
+
+        dx = ndi.gaussian_filter(
+            (np.random.rand(*img_np.shape[:2]) * 2 - 1),
+            sigma, mode="constant", cval=0
+        ) * alpha
+        dy = ndi.gaussian_filter(
+            (np.random.rand(*img_np.shape[:2]) * 2 - 1),
+            sigma, mode="constant", cval=0
+        ) * alpha
+
+        x, y = np.meshgrid(np.arange(img_np.shape[1]), np.arange(img_np.shape[0]))
+        indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
+
+        deformed = np.zeros_like(img_np)
+        for c in range(img_np.shape[2]):
+            deformed[..., c] = ndi.map_coordinates(
+                img_np[..., c], indices, order=1, mode="reflect"
+            ).reshape(img_np.shape[:2])
+
+        # Convert back to tensor
+        return torch.tensor(deformed.transpose(2, 0, 1), dtype=img.dtype)
+
+
+# -------------------------------------------------------------------------
+# FLOAT EQUALIZE (uses classic F.equalize)
+# -------------------------------------------------------------------------
 class FloatEqualize:
     def __init__(self, p: float):
         self.p = p
 
     def __call__(self, img):
-        if random.random() < self.p:
-            return v2.functional.equalize(img)
-        return img
+        if random.random() >= self.p:
+            return img
 
+        # img is C×H×W float32
+        c, h, w = img.shape
+        out = torch.empty_like(img)
+
+        for i in range(c):
+            # convert to uint8
+            ch = (img[i] * 255).byte()  # (H, W)
+
+            # expand to (1, H, W) because torchvision equalize requires 3D
+            ch_3d = ch.unsqueeze(0)
+
+            # equalize
+            ch_eq = F.equalize(ch_3d)
+
+            # back to float
+            out[i] = ch_eq.squeeze(0).float() / 255.0
+
+        return out
+
+
+
+# -------------------------------------------------------------------------
+# FLOAT CONTRAST (simple manual implementation)
+# -------------------------------------------------------------------------
 class FloatContrast:
     def __init__(self, p: float, contrast_range: Tuple[float, float]):
         self.p = p
@@ -56,30 +112,10 @@ class FloatContrast:
             return (img * c).clamp(0, 1)
         return img
 
-#######################################################################################################
-# MULTI-CROP TRANSFORM FOR DINO ON CELL IMAGES
-# ----------------------------------------------------------------------------------------------------
-#    Parameters:
-#    ---------------------------
-#    image_size : int
-#        Size of input images (assumed square, e.g. 96).
-#
-#    global_crops_scale : Tuple[float, float]
-#        Relative scale range for global crops in RandomResizedCrop.
-#
-#    local_crops_scale : Tuple[float, float]
-#        Relative scale range for local crops.
-#
-#    local_crops_number : int
-#        Number of local crops to generate per image.
-#
-#    Returns:
-#    ---------------------------
-#    views : List[Tensor]
-#        A list of augmented crops for the same input image. Each crop is a tensor (C, H, W).
-#######################################################################################################
 
-
+# -------------------------------------------------------------------------
+# MULTI-CROP TRANSFORM (DINO)
+# -------------------------------------------------------------------------
 class MultiCropTransform:
     def __init__(
         self,
@@ -91,9 +127,9 @@ class MultiCropTransform:
     ):
         self.local_crops_number = local_crops_number
 
-        # ---------------------------------------------------------------------
-        # 1. READ AUGMENTATION PARAMETERS FROM YAML
-        # ---------------------------------------------------------------------
+        # -----------------------
+        # 1. YAML parameters
+        # -----------------------
         aug = cfg.get("augment", {}) if cfg is not None else {}
 
         elastic_p = float(aug.get("elastic_p", 0.0))
@@ -102,55 +138,41 @@ class MultiCropTransform:
 
         solarization_p = float(aug.get("solarization_p", 0.0))
         equalize_p = float(aug.get("equalize_p", 0.0))
-
         contrast_p = float(aug.get("contrast_p", 0.0))
         contrast_range = tuple(aug.get("contrast_range", [0.8, 1.2]))
 
-        # rotation angles like [-180, 180] for full random rotation
-        # or None if disabled
         rotation_degrees = aug.get("rotation_degrees", None)
         if rotation_degrees is not None:
             rotation_degrees = tuple(rotation_degrees)
 
-        # ---------------------------------------------------------------------
-        # 2. AUGMENTATIONS APPLIED TO BOTH GLOBAL AND LOCAL CROPS
-        # ---------------------------------------------------------------------
+        # -----------------------
+        # 2. Extra transforms
+        # -----------------------
         extra = []
 
-        # Elastic deformation
         if elastic_p > 0:
             extra.append(ElasticDeformation(elastic_p, elastic_alpha_range, elastic_sigma_range))
 
-        # Histogram equalization (float32-safe version)
         if equalize_p > 0:
             extra.append(FloatEqualize(equalize_p))
 
-        # Contrast jitter (float32-safe version)
         if contrast_p > 0:
             extra.append(FloatContrast(contrast_p, contrast_range))
 
-        # Solarization
         if solarization_p > 0:
             extra.append(Solarization(solarization_p))
 
-        # Rootation
         if rotation_degrees is None:
-            rotation = T.Identity()  
+            rotation = T.Identity()
         else:
             rotation = T.RandomRotation(
                 degrees=rotation_degrees,
                 interpolation=T.InterpolationMode.BILINEAR,
             )
 
-        # ---------------------------------------------------------------------
-        # 4. GLOBAL CROP PIPELINE
-        # ---------------------------------------------------------------------
-        # Applied:
-        # - RandomResizedCrop with global scale
-        # - Random flips
-        # - Rotation
-        # - Gaussian blur
-        # - *extra transforms (elastic, equalize, contrast, solarization)
+        # -----------------------
+        # 3. GLOBAL PIPELINE
+        # -----------------------
         self.global_transform = T.Compose(
             [
                 T.RandomResizedCrop(
@@ -166,12 +188,9 @@ class MultiCropTransform:
             ]
         )
 
-        # ---------------------------------------------------------------------
-        # 5. LOCAL CROP PIPELINE
-        # ---------------------------------------------------------------------
-        # Same as global, but:
-        #   - Smaller size = image_size // 2
-        #   - local_crops_scale for RandomResizedCrop
+        # -----------------------
+        # 4. LOCAL PIPELINE
+        # -----------------------
         local_size = image_size // 2
 
         self.local_transform = T.Compose(
@@ -189,21 +208,12 @@ class MultiCropTransform:
             ]
         )
 
-    # -------------------------------------------------------------------------
-    # 6. APPLY TRANSFORMS
-    # -------------------------------------------------------------------------
     def __call__(self, img):
-        """
-        Returns:
-            [2 * global crops] + [local_crops_number * local crops]
-        """
         views = []
 
-        # Generate 2 global crops
         for _ in range(2):
             views.append(self.global_transform(img))
 
-        # Generate N local crops
         for _ in range(self.local_crops_number):
             views.append(self.local_transform(img))
 
