@@ -338,13 +338,15 @@ def run_dino_experiment(cfg: Dict):
         )
 
         metrics = compute_all_metrics(student, teacher, dataloader, device=device, num_batches=5)
-        wandb.log(metrics, step=epoch)
-        wandb.log({"loss": avg_loss}, step=epoch)
+        if use_wandb:
+            wandb.log(metrics, step=epoch)
+            wandb.log({"loss": avg_loss}, step=epoch)
 
 
         if (epoch + 1) % 5 == 0:
             sil = compute_silhouette(student, dataset, device=device, num_samples=500)
-            wandb.log({"silhouette": sil}, step=epoch)
+            if use_wandb:
+                wandb.log({"silhouette": sil}, step=epoch)
             print(f"Silhouette score at epoch {epoch+1}: {sil:.4f}")
 
         print(f"[{experiment_name}] Epoch {epoch+1}/{epochs} - DINO loss: {avg_loss:.4f}")
