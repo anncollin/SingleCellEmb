@@ -74,8 +74,10 @@ def main():
     hostname = socket.gethostname()
 
     if "anncollin" in hostname:
+        print('you are on local machine')
         cfg["data_root"] = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB/"
     elif "orion" in hostname:
+        print('you are on orion')
         cfg["data_root"] = "/BensonDATA_orion/anncollin/MyDB"
     else:
         raise RuntimeError(
