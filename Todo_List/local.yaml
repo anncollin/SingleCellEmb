@@ -13,7 +13,7 @@ batch_size: 64
 epochs: 20
 learning_rate: 1e-4
 weight_decay: 0.05
-num_workers: 1
+num_workers: 8
 
 # DINO Multi-crop
 global_crops_scale: [0.4, 1.0]
