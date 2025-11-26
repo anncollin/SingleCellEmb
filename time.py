@@ -23,7 +23,7 @@ hostname = socket.gethostname()
 if "anncollin" in hostname:
     data_root = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB/"
 elif "orion" in hostname:
-    data_root = "/BensonDATA_orion/anncollin/MyDB"
+    data_root = "/DATA/annso/MyDB"
 else:
     raise RuntimeError(f"Unknown hostname '{hostname}'. Add mapping.")
 

@@ -78,7 +78,7 @@ def main():
         cfg["data_root"] = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB/"
     elif "orion" in hostname:
         print('you are on orion')
-        cfg["data_root"] = "/BensonDATA_orion/anncollin/MyDB"
+        cfg["data_root"] = "/DATA/annso/MyDB"
     else:
         raise RuntimeError(
             f"Unknown hostname '{hostname}'. "

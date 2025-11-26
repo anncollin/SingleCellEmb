@@ -82,12 +82,9 @@ class CellDataset(Dataset):
         imgs, _, _ = load_from_zip(
             zip_filename=zip_path,
             batch_size=1,      
-            read_all=False,    # random sampling inside the ZIP
+            read_all=False,    
             channel="both"
         )
-
-        if imgs.shape[0] == 0:
-            raise RuntimeError(f"[CellZipDataset] ZIP {zip_path} contains no images.")
 
         # imgs shape: (1, 2, 96, 96)
         img = imgs[0].astype(np.float32)    # -> (2, 96, 96)
