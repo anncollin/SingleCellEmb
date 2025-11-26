@@ -22,15 +22,15 @@ local_crops_number: 6
 
 # Augmentation settings
 augment:
-  elastic_p: 0.2
+  elastic_p: 0.0
   elastic_alpha_range: [20.0, 40.0]
   elastic_sigma_range: [3.0, 5.0]
 
-  solarization_p: 0.1
+  solarization_p: 0.0
 
-  equalize_p: 0.1
+  equalize_p: 0.0
 
-  contrast_p: 0.2
+  contrast_p: 0.0
   contrast_range: [0.8, 1.2]
 
   rotation_degrees: [-180, 180]        
