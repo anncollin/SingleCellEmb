@@ -56,3 +56,24 @@ for i, batch in enumerate(loader):
 
 dt = time.time() - t0
 print(f"{n_batches} batches in {dt:.1f}s → {dt/n_batches:.3f} s/batch")
+
+
+for nw in [0, 1, 2, 4, 5, 6 ,7 ,8, 12, 16]:
+    loader = DataLoader(
+        dataset,
+        batch_size=cfg["batch_size"],
+        num_workers=nw,
+        shuffle=True,
+        pin_memory=True  
+    )
+
+    t0 = time.time()
+    n_batches = 5
+
+    for i, batch in enumerate(loader):
+        if i >= n_batches:
+            break
+
+    dt = time.time() - t0
+    print(f"workers={nw:2d} → {dt/n_batches:.3f} s/batch")
+
