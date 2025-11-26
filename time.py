@@ -58,7 +58,7 @@ dt = time.time() - t0
 print(f"{n_batches} batches in {dt:.1f}s → {dt/n_batches:.3f} s/batch")
 
 
-for nw in [0, 1, 2, 4, 5, 6 ,7 ,8, 12, 16]:
+for nw in [2, 4, 5, 6 ,7 ,8, 12, 16]:
     loader = DataLoader(
         dataset,
         batch_size=cfg["batch_size"],
