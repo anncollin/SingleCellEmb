@@ -75,10 +75,12 @@ def main():
 
     if "anncollin" in hostname:
         print('you are on local machine')
-        cfg["data_root"] = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB/"
+        cfg["data_root"]  = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB_npy/"
+        cfg["label_path"] = "/home/anncollin/Desktop/Nucleoles/dataset/labels/unique_drugs.csv"
     elif "orion" in hostname:
         print('you are on orion')
-        cfg["data_root"] = "/DATA/annso/MyDB"
+        cfg["data_root"]  = "/DATA/annso/MyDB_npy"
+        cfg["label_path"] = "/DATA/annso/unique_drugs.csv"
     else:
         raise RuntimeError(
             f"Unknown hostname '{hostname}'. "
@@ -97,7 +99,7 @@ def main():
     # ----------------------------------------------------------------------
     
     print(f"Loaded experiment config from {args.todo}:")
-    run_dino_experiment(cfg)
+    #run_dino_experiment(cfg)
     evaluate_dino_experiment(cfg)
 
 

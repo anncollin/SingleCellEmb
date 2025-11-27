@@ -7,22 +7,11 @@ import torch
 import torch.nn.functional as F
 from scipy.stats import wasserstein_distance
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from itertools import combinations
 from tqdm import tqdm
-import pandas as pd 
+import pandas as pd
 
 from SSL.model import create_vit_small_backbone, DINOHead, DINOStudent
 from SSL.utils import ensure_dir
-
-#########################################################################################
-# IMPORT load_from_zip (the ONLY allowed reader)
-#########################################################################################
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
-DATASET_UTILS_DIR = os.path.join(PROJECT_ROOT, "dataset")
-sys.path.append(DATASET_UTILS_DIR)
-
-from createDB_utils import load_from_zip
 
 
 #######################################################################################################
@@ -52,54 +41,51 @@ def load_drug_list(csv_path: str) -> List[str]:
 
 
 #######################################################################################################
-# ZIP PATH RESOLUTION
+# FIND FOLDER OF NPY FILES FOR A DRUG
 #######################################################################################################
-def get_zip_path_from_drug(drug_name):
-    csv_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "dataset", "labels", "unique_drugs.csv")
-    )
+def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> str:
+    df = pd.read_csv(cfg["label_path"], header=None, dtype=str)
 
-    df = pd.read_csv(csv_path, header=None)
-    matches = df[df.iloc[:, 2].astype(str).str.strip().str.lower() ==
-                 drug_name.strip().lower()]
-
-    if matches.empty:
-        print(f"[Eval] WARNING: drug {drug_name} not found")
+    # 1. Find row i where column 2 == drug
+    matches = df[df.iloc[:, 2].str.strip() == drug_name.strip()]
+    if len(matches) == 0:
         return None
 
-    base_dataset_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "dataset", "MyDB")
-    )
+    # 2. Build path = data_root + df[i,0] + "/" + df[i,1]
+    plate = matches.iloc[0, 0].strip()
+    well  = matches.iloc[0, 1].strip()
 
-    plate = str(matches.iloc[0][0]).strip()
-    well  = str(matches.iloc[0][1]).strip().zfill(6)
+    folder = os.path.join(cfg["data_root"], plate, well)
 
-    zp = os.path.join(base_dataset_path, plate, f"{well}.zip")
-    return zp if os.path.exists(zp) else None
+    return folder if os.path.isdir(folder) else None
 
 
 #######################################################################################################
-# LOAD ALL CELLS FOR ONE DRUG
+# LOAD ALL IMAGES (.NPY FILES)
 #######################################################################################################
-def load_all_cells_for_drug(zip_path: str, normalize_16bit: bool = True):
-    imgs, _, _ = load_from_zip(
-        zip_filename=zip_path,
-        batch_size=1,
-        start=0,
-        read_all=True,
-        channel="both",
+def load_all_cells_for_drug(npy_folder: str) -> torch.Tensor:
+    """
+    Read every .npy file in the folder.
+    Each file contains a (2,96,96) float32 cell array.
+    """
+
+    files = sorted(
+        f for f in os.listdir(npy_folder)
+        if f.endswith(".npy")
     )
-    if imgs.shape[0] == 0:
+
+    if len(files) == 0:
         return torch.empty(0, 2, 96, 96)
 
-    if normalize_16bit and imgs.max() > 1.0:
-        imgs = imgs / 65535.0
+    imgs = [np.load(os.path.join(npy_folder, f)).astype(np.float32)
+            for f in files]
 
-    return torch.from_numpy(imgs.astype(np.float32))
+    arr = np.stack(imgs, axis=0)  
+    return torch.from_numpy(arr)
 
 
 #######################################################################################################
-# EMBEDDING EXTRACTION (BATCHED)
+# EMBEDDING EXTRACTION
 #######################################################################################################
 @torch.no_grad()
 def compute_embeddings_for_images(student, imgs: torch.Tensor, device="cuda", batch_size=128):
@@ -124,6 +110,7 @@ def marginal_wasserstein_multithread(A: np.ndarray,
                                      B: np.ndarray,
                                      normalize: bool = False,
                                      n_threads: int = 16) -> float:
+
     if normalize:
         A = F.normalize(torch.from_numpy(A), p=2, dim=1).numpy()
         B = F.normalize(torch.from_numpy(B), p=2, dim=1).numpy()
@@ -148,40 +135,41 @@ def marginal_wasserstein_multithread(A: np.ndarray,
 
 
 #######################################################################################################
-# PAIRWISE COMPUTATION — MEMORY SAFE
+# PAIRWISE WASSERSTEIN MATRIX
 #######################################################################################################
 def compute_pairwise_emd_matrix(student,
                                 drugs: List[str],
+                                cfg: Dict,
                                 device="cuda",
                                 batch_size=128,
                                 n_threads=16,
                                 normalize=False):
 
     valid_drugs = []
-    zp_list     = []
+    folder_list = []
 
-    # resolve all drugs
+    # resolve all drugs → folder paths
     for drug in drugs:
-        zp = get_zip_path_from_drug(drug)
-        if zp is not None:
+        folder = get_npy_folder_from_drug(drug, cfg)
+        if folder is not None:
             valid_drugs.append(drug)
-            zp_list.append(zp)
+            folder_list.append(folder)
 
     D = len(valid_drugs)
     M = np.zeros((D, D), dtype=np.float32)
 
-    # pairwise computation
+    # Main loop
     for i in tqdm(range(D), desc="Outer loop"):
-        imgs_i = load_all_cells_for_drug(zp_list[i])
+        imgs_i = load_all_cells_for_drug(folder_list[i])
         A = compute_embeddings_for_images(student, imgs_i, device=device, batch_size=batch_size)
 
         for j in range(i, D):
-            imgs_j = load_all_cells_for_drug(zp_list[j])
+            imgs_j = load_all_cells_for_drug(folder_list[j])
             B = compute_embeddings_for_images(student, imgs_j, device=device, batch_size=batch_size)
+            dist = marginal_wasserstein_multithread(
+                A, B, normalize=normalize, n_threads=n_threads
+            )
 
-            dist = marginal_wasserstein_multithread(A, B,
-                                                    normalize=normalize,
-                                                    n_threads=n_threads)
             M[i, j] = M[j, i] = dist
 
             del imgs_j, B
@@ -203,7 +191,7 @@ def save_distance_matrix(matrix, labels, output_csv):
 
 
 #######################################################################################################
-# MAIN ENTRY POINT TO BE CALLED BY YOUR SCRIPT
+# MAIN ENTRY POINT
 #######################################################################################################
 def evaluate_dino_experiment(cfg: Dict):
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -213,9 +201,7 @@ def evaluate_dino_experiment(cfg: Dict):
 
     ckpt = os.path.join(results_root, "checkpoints", "final_weights.pth")
 
-    # load drug list
-    drugs_csv = os.path.join(PROJECT_ROOT, "dataset", "labels", "unique_drugs.csv")
-    drugs = load_drug_list(drugs_csv)
+    drugs = load_drug_list(cfg["label_path"])
 
     print(f"[Eval] Loading student from {ckpt}")
     student = load_trained_student(ckpt, cfg, device=device)
@@ -223,6 +209,7 @@ def evaluate_dino_experiment(cfg: Dict):
     labels, matrix = compute_pairwise_emd_matrix(
         student=student,
         drugs=drugs,
+        cfg=cfg,
         device=device,
         batch_size=128,
         n_threads=16,

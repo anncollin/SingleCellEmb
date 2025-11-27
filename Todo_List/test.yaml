@@ -9,7 +9,7 @@ patch_size: 8
 out_dim: 768
 
 # Training
-batch_size: 64
+batch_size: 16
 epochs: 5
 learning_rate: 1e-4
 weight_decay: 0.05

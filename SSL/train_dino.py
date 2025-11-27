@@ -39,13 +39,13 @@ def compute_silhouette(student, dataset, device="cuda", num_samples=500):
         embeddings.append(z)
 
         # ---- Infer the domain label (siRNA vs non-siRNA) ----
-        # Note: __getitem__ does not use idx, so we reproduce sampling.
-        zip_path = dataset.zip_files[random.randrange(len(dataset.zip_files))]
+        path = dataset.npy_files[random.randrange(len(dataset.npy_files))]
 
-        if "siRNA" in zip_path:
+        if "siRNA" in path:
             labels.append(1)
         else:
             labels.append(0)
+
 
     embeddings = np.stack(embeddings)
     labels = np.array(labels)
