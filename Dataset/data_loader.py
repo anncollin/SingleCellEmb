@@ -20,7 +20,7 @@ class CellDataset(Dataset):
     def __init__(self, root_dir, transform=None, synthetic_length=100_000):
         super().__init__()
         self.root_dir = root_dir
-        self.transform = transform
+        self.transform = transform   # kept for compatibility, but NOT USED
         self.synthetic_length = synthetic_length
 
         # find all .npy files
@@ -40,10 +40,8 @@ class CellDataset(Dataset):
 
     def __getitem__(self, idx):
         path = random.choice(self.npy_files)
-        arr = np.load(path)              
-        tensor = torch.from_numpy(arr)
-
-        if self.transform:
-            return self.transform(tensor)
+        arr = np.load(path)
+        tensor = torch.from_numpy(arr).float()  
 
         return tensor
+

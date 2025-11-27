@@ -1,4 +1,4 @@
-experiment_name: "DINO_cells_p8"
+experiment_name: "fullStrong"
 
 # Dataset
 image_size: 96
@@ -9,29 +9,33 @@ patch_size: 8
 out_dim: 768
 
 # Training
-batch_size: 16
-epochs: 5
+batch_size: 64
+epochs: 50
 learning_rate: 1e-4
 weight_decay: 0.05
 num_workers: 4
 
 # DINO Multi-crop
-global_crops_scale: [0.4, 1.0]
-local_crops_scale: [0.1, 0.4]
+global_crops_scale: [0.9, 1.0]
+local_crops_scale: [0.2, 0.4]
 local_crops_number: 6
 
 # Augmentation settings
 augment:
-  elastic_p: 0.2
-  elastic_alpha_range: [20.0, 40.0]
-  elastic_sigma_range: [3.0, 5.0]
+  elastic_p: 0.7
+  elastic_alpha_range: [4.0, 8.0] 
+  elastic_sigma_range: [30.0, 40.0] 
 
   solarization_p: 0.1
 
-  equalize_p: 0.1
+  brightness_dapi_p: 0.5
+  brightness_dapi_range: [0.5, 3.0]
+
+  brightness_egfp_p: 0.5
+  brightness_egfp_range: [0.5, 2.0]
 
   contrast_p: 0.2
-  contrast_range: [0.8, 1.2]
+  contrast_range: [0.9, 1.1]
 
   rotation_degrees: [-180, 180]        
 

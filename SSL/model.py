@@ -111,8 +111,9 @@ def create_vit_small_backbone(
     in_chans: int = 2,
 ) -> nn.Module:
     # img_size=None allows multi-crop of any spatial size (48, 96, etc.)
+    # vit_small_patch8_224
     model = timm.create_model(
-        "vit_small_patch8_224",
+        "vit_tiny_patch16_224",
         img_size=None,
         dynamic_img_size=True,
         patch_size=patch_size,

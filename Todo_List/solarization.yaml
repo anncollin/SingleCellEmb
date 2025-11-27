@@ -1,0 +1,48 @@
+experiment_name: "solarization"
+
+# Dataset
+image_size: 96
+in_channels: 2
+
+# ViT / DINO settings
+patch_size: 8
+out_dim: 768
+
+# Training
+batch_size: 64
+epochs: 50
+learning_rate: 1e-4
+weight_decay: 0.05
+num_workers: 4
+
+# DINO Multi-crop
+global_crops_scale: [0.9, 1.0]
+local_crops_scale: [0.2, 0.4]
+local_crops_number: 6
+
+# Augmentation settings
+augment:
+  elastic_p: 0.0
+  elastic_alpha_range: [4.0, 8.0] 
+  elastic_sigma_range: [30.0, 40.0] 
+
+  solarization_p: 0.7
+
+  brightness_dapi_p: 0.0
+  brightness_dapi_range: [0.5, 3.0]
+
+  brightness_egfp_p: 0.0
+  brightness_egfp_range: [0.5, 2.0]
+
+  contrast_p: 0.0
+  contrast_range: [0.9, 1.1]
+
+  rotation_degrees: [-180, 180]        
+
+# EMA
+base_momentum: 0.996
+max_momentum: 1.0
+
+# Output
+results_root: "./Results/test"
+
