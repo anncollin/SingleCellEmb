@@ -1,5 +1,5 @@
 import math
-from typing import Dict, List
+from typing import Dict
 
 import torch
 from torch.utils.data import DataLoader
@@ -33,18 +33,14 @@ def compute_silhouette(student, dataset, gpu_transform, device="cuda", num_sampl
 
     for idx in idxs:
 
-        # ---- RAW IMAGE ----
-        img = dataset[idx].unsqueeze(0).to(device)   # (1,2,96,96)
+        img = dataset[idx].unsqueeze(0).to(device)
 
-        # ---- GPU MULTI-CROP ----
         crops = gpu_transform(img)
-        img = crops[0]                               # first global crop
+        img = crops[0]
 
-        # ---- EMBEDDING ----
         z = student.backbone(img).squeeze(0).cpu().numpy()
         embeddings.append(z)
 
-        # ---- DOMAIN LABEL ----
         path = dataset.npy_files[random.randrange(len(dataset.npy_files))]
         labels.append(1 if "siRNA" in path else 0)
 
@@ -78,33 +74,27 @@ def compute_all_metrics(student, teacher, dataloader, gpu_transform, device="cud
 
         images = images.to(device, non_blocking=True)
 
-        # ---- GPU MULTI-CROP ----
         crops = gpu_transform(images)
         x = crops[0]
 
-        # ---- FORWARD ----
         z_s = student(x)
         z_t = teacher(x)
         h_s = student.backbone(x)
         h_t = teacher.backbone(x)
 
-        # ---- ENTROPY ----
         p_s = torch.softmax(z_s, dim=-1) + 1e-12
         p_t = torch.softmax(z_t, dim=-1) + 1e-12
 
         student_entropies.append(float(-(p_s * p_s.log()).sum(dim=1).mean()))
         teacher_entropies.append(float(-(p_t * p_t.log()).sum(dim=1).mean()))
 
-        # ---- VARIANCE ----
         student_embeddings.append(h_s.cpu())
         teacher_embeddings.append(h_t.cpu())
 
-        # ---- COSINE SIM ----
         z_s_norm = z_s / (z_s.norm(dim=-1, keepdim=True) + 1e-12)
         z_t_norm = z_t / (z_t.norm(dim=-1, keepdim=True) + 1e-12)
         cosine_sims.append(float((z_s_norm * z_t_norm).sum(dim=-1).mean()))
 
-        # ---- ACTIVE DIMENSIONS ----
         proto_idx = z_s.argmax(dim=-1).cpu()
         proto_indices.append(proto_idx)
 
@@ -138,7 +128,7 @@ def compute_all_metrics(student, teacher, dataloader, gpu_transform, device="cud
 
 
 #######################################################################################################
-# TRAIN ONE EPOCH OF DINO (GPU KORNIA PIPELINE)
+# TRAIN ONE EPOCH OF DINO (HARD-CODED 10% DATASET)
 #######################################################################################################
 def train_one_epoch(
     student,
@@ -160,13 +150,19 @@ def train_one_epoch(
     total_loss = 0.0
     n_batches = 0
 
+    # ---- HARD-CODE: USE ONLY 10% OF DATASET PER EPOCH ----
+    total_batches = len(dataloader)
+    max_batches = max(1, int(0.1 * total_batches))
+
     dataloader = tqdm(dataloader, desc=f"Epoch {epoch+1}", ncols=100, disable=use_wandb)
 
     for it, images in enumerate(dataloader):
 
-        images = images.to(device, non_blocking=True)     # (B,2,96,96)
+        if it >= max_batches:
+            break
 
-        # ---- GPU MULTI-CROP ----
+        images = images.to(device, non_blocking=True)
+
         crops = gpu_transform(images)
 
         student_outputs = [student(c) for c in crops]
@@ -179,7 +175,7 @@ def train_one_epoch(
         optimizer.step()
 
         momentum = max_momentum - (max_momentum - base_momentum) * (
-            math.cos(math.pi * (epoch + it / len(dataloader))) + 1.0
+            math.cos(math.pi * (epoch + it / max_batches)) + 1.0
         ) / 2.0
 
         update_teacher(student, teacher, momentum)
@@ -193,7 +189,7 @@ def train_one_epoch(
 
 
 #######################################################################################################
-# RUN DINO EXPERIMENT (CLEAN PIPELINE)
+# RUN DINO EXPERIMENT (CLEAN PIPELINE, HARD-CODED 10%)
 #######################################################################################################
 def run_dino_experiment(cfg: Dict):
 
@@ -231,7 +227,6 @@ def run_dino_experiment(cfg: Dict):
     checkpoints_dir = ensure_dir(f"{results_root}/checkpoints")
     experiment_name = str(cfg.get("experiment_name", "DINO_experiment"))
 
-    # ---- GPU TRANSFORM ----
     gpu_transform = KorniaMultiCropTransform(
         image_size=image_size,
         global_crops_scale=global_crops_scale,
@@ -240,7 +235,6 @@ def run_dino_experiment(cfg: Dict):
         cfg=cfg
     ).to(device)
 
-    # ---- DATA ----
     dataset = CellDataset(root_dir=data_root)
     dataloader = DataLoader(
         dataset,
@@ -251,11 +245,6 @@ def run_dino_experiment(cfg: Dict):
         drop_last=True,
     )
 
-    # ------------------------------------- DEBUG: VISUALIZE GPU AUGMENTATIONS ONCE -------------------------------------
-    # visualize_kornia_multicrop(dataloader, gpu_transform, device=device)
-    # -------------------------------------------------------------------------------------------------------------------
-
-    # ---- MODELS ----
     backbone_student = create_vit_small_backbone(
         patch_size=patch_size,
         in_chans=in_chans,
@@ -293,7 +282,6 @@ def run_dino_experiment(cfg: Dict):
         betas=(0.9, 0.95),
     )
 
-    # ---- TRAIN ----
     for epoch in range(epochs):
 
         avg_loss = train_one_epoch(
@@ -344,97 +332,3 @@ def run_dino_experiment(cfg: Dict):
     print(f"[{experiment_name}] Saved final weights to {final_ckpt}.")
 
     return student, teacher
-
-
-
-#######################################################################################################
-# VISUALIZE DATA AUGMENTATION
-#######################################################################################################
-
-def _normalize_to_uint8(img):
-    new_im = img * 1200.0
-    return np.clip(new_im, 0, 255).astype(np.uint8)
-
-@torch.no_grad()
-def visualize_kornia_multicrop(
-    dataloader,
-    gpu_transform,
-    device="cuda",
-    n_images=4
-):
-    """
-    Visualize multiple samples with:
-      - First row per sample: 2 global crops
-      - Second row per sample: all local crops
-    """
-
-    import matplotlib.pyplot as plt
-    import torch
-    import numpy as np
-
-    gpu_transform.eval()
-
-    # ---- Take ONE batch ----
-    images = next(iter(dataloader))          # (B, C, H, W)
-    images = images.to(device)
-
-    B = images.shape[0]
-    n_images = min(n_images, B)
-
-    # ---- Apply GPU multi-crop ----
-    crops = gpu_transform(images)            # [g0, g1, l0, l1, ..., lN]
-
-    global_crops = crops[:2]                 # 2 globals
-    local_crops  = crops[2:]                 # N locals
-
-    n_globals = 2
-    n_locals  = len(local_crops)
-    n_cols    = max(n_globals, n_locals)
-
-    fig, axes = plt.subplots(
-        2 * n_images,
-        n_cols,
-        figsize=(3 * n_cols, 3 * 2 * n_images)
-    )
-
-    if n_images == 1:
-        axes = np.expand_dims(axes, axis=0)
-
-    # ---- Utility: tensor -> uint8 RGB ----
-    def to_uint8_rgb(v):
-        v = v.detach().cpu().numpy()
-        g = _normalize_to_uint8(v[0])
-        b = _normalize_to_uint8(v[1])
-
-        rgb = np.zeros((v.shape[1], v.shape[2], 3), dtype=np.uint8)
-        rgb[..., 1] = g
-        rgb[..., 2] = b
-        return rgb
-
-    # ---- Fill the grid ----
-    for i in range(n_images):
-
-        # GLOBALS (row 2*i)
-        for j in range(n_globals):
-            img = to_uint8_rgb(global_crops[j][i])
-            axes[2*i, j].imshow(img)
-            axes[2*i, j].set_title(f"Img {i} - Global {j}")
-            axes[2*i, j].axis("off")
-
-        for j in range(n_globals, n_cols):
-            axes[2*i, j].axis("off")
-
-        # LOCALS (row 2*i + 1)
-        for j in range(n_locals):
-            img = to_uint8_rgb(local_crops[j][i])
-            axes[2*i + 1, j].imshow(img)
-            axes[2*i + 1, j].set_title(f"Img {i} - Local {j}")
-            axes[2*i + 1, j].axis("off")
-
-        for j in range(n_locals, n_cols):
-            axes[2*i + 1, j].axis("off")
-
-    plt.suptitle("Kornia DINO Augmentations – Multiple Images (uint8 ×1200)")
-    plt.tight_layout()
-    plt.show()
-
