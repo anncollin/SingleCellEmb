@@ -80,7 +80,7 @@ def main():
     elif "orion" in hostname:
         print('you are on orion')
         cfg["data_root"]  = "/DATA/annso/MyDB_npy"
-        cfg["label_path"] = "/DATA/annso/unique_drugs.csv"
+        cfg["label_path"] = "/DATA/annso/labels/unique_drugs.csv"
     else:
         raise RuntimeError(
             f"Unknown hostname '{hostname}'. "
