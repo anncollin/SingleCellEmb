@@ -148,6 +148,7 @@ def train_one_epoch(
     optimizer: torch.optim.Optimizer,
     epoch: int,
     gpu_transform,
+    use_wandb: bool, 
     device: str = "cuda",
     base_momentum: float = 0.996,
     max_momentum: float = 1.0,
@@ -159,7 +160,7 @@ def train_one_epoch(
     total_loss = 0.0
     n_batches = 0
 
-    dataloader = tqdm(dataloader, desc=f"Epoch {epoch+1}", ncols=100)
+    dataloader = tqdm(dataloader, desc=f"Epoch {epoch+1}", ncols=100, disable=use_wandb)
 
     for it, images in enumerate(dataloader):
 
@@ -303,6 +304,7 @@ def run_dino_experiment(cfg: Dict):
             optimizer=optimizer,
             epoch=epoch,
             gpu_transform=gpu_transform,
+            use_wandb=use_wandb,
             device=device,
             base_momentum=base_momentum,
             max_momentum=max_momentum,
