@@ -99,7 +99,7 @@ def main():
     # ----------------------------------------------------------------------
     
     print(f"Loaded experiment config from {args.todo}:")
-    #run_dino_experiment(cfg)
+    run_dino_experiment(cfg)
     evaluate_dino_experiment(cfg)
 
 
