@@ -4,17 +4,20 @@ from typing import Dict, List
 import numpy as np
 import torch
 import torch.nn.functional as F
-from scipy.stats import wasserstein_distance
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from itertools import combinations
+from multiprocessing import Pool
+import multiprocessing
 from tqdm import tqdm
 import pandas as pd
+import pickle
+from scipy.stats import wasserstein_distance
 
 from SSL.model import create_vit_small_backbone, DINOHead, DINOStudent
 from SSL.utils import ensure_dir
 
 
 #######################################################################################################
-# TRAINED STUDENT LOADING
+# LOAD TRAINED STUDENT
 #######################################################################################################
 def load_trained_student(checkpoint_path: str, cfg: Dict, device: str = "cuda"):
 
@@ -42,7 +45,7 @@ def load_drug_list(csv_path: str) -> List[str]:
 
 
 #######################################################################################################
-# FIND FOLDER OF NPY FILES FOR A DRUG
+# MAP DRUG -> FOLDER
 #######################################################################################################
 def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> str:
 
@@ -60,7 +63,7 @@ def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> str:
 
 
 #######################################################################################################
-# STREAMING EMBEDDING EXTRACTION (USES ALL CELLS, BOUNDED MEMORY)
+# STREAM ALL CELLS -> EMBEDDINGS (FULL DATASET, GPU SAFE)
 #######################################################################################################
 @torch.no_grad()
 def compute_embeddings_for_drug_folder(
@@ -68,24 +71,16 @@ def compute_embeddings_for_drug_folder(
     folder: str,
     device: str = "cuda",
     batch_size: int = 128,
-) -> np.ndarray:
-    """
-    Streams all .npy files from disk in mini-batches.
-    Uses ALL cells without ever stacking the full dataset in RAM or GPU.
-    """
+) -> torch.Tensor:
 
-    files = sorted(
-        f for f in os.listdir(folder)
-        if f.endswith(".npy")
-    )
+    files = sorted(f for f in os.listdir(folder) if f.endswith(".npy"))
 
     if len(files) == 0:
-        return np.zeros((0, 1), dtype=np.float32)
+        return torch.empty(0, 1)
 
     out = []
-    N = len(files)
 
-    for i in range(0, N, batch_size):
+    for i in range(0, len(files), batch_size):
 
         batch_files = files[i:i + batch_size]
 
@@ -93,69 +88,80 @@ def compute_embeddings_for_drug_folder(
             [np.load(os.path.join(folder, f)).astype(np.float32)
              for f in batch_files],
             axis=0
-        )  # (B, 2, 96, 96)
+        )
 
         batch = torch.from_numpy(batch).to(device, non_blocking=True)
-
         z = student.backbone(batch)
-        out.append(z.cpu().numpy())
+        out.append(z.cpu())
 
         del batch
         torch.cuda.empty_cache()
 
-    return np.concatenate(out, axis=0)
+    return torch.cat(out, dim=0)
 
 
 #######################################################################################################
-# 1D MULTI-THREADED MARGINAL WASSERSTEIN DISTANCE
+# MEAN MARGINAL EMD (SCIPY VERSION)
 #######################################################################################################
-def marginal_wasserstein_multithread(
-    A: np.ndarray,
-    B: np.ndarray,
-    normalize: bool = False,
-    n_threads: int = 16,
-) -> float:
+def mean_emd(emb_A: torch.Tensor,
+             emb_B: torch.Tensor,
+             normalize: bool = False) -> float:
+
+    d = emb_A.shape[1]
 
     if normalize:
-        A = F.normalize(torch.from_numpy(A), p=2, dim=1).numpy()
-        B = F.normalize(torch.from_numpy(B), p=2, dim=1).numpy()
+        emb_A = F.normalize(emb_A, p=2, dim=1).numpy()
+        emb_B = F.normalize(emb_B, p=2, dim=1).numpy()
+    else:
+        emb_A = emb_A.numpy()
+        emb_B = emb_B.numpy()
 
-    d = A.shape[1]
+    emd_score = 0.0
+    for i in range(d):
+        emd_score += wasserstein_distance(emb_A[:, i], emb_B[:, i])
 
-    if d <= 4 or n_threads <= 1:
-        return sum(wasserstein_distance(A[:, i], B[:, i]) for i in range(d)) / d
-
-    def w1_dim(i):
-        return wasserstein_distance(A[:, i], B[:, i])
-
-    max_workers = min(n_threads, d)
-    total = 0.0
-
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = [ex.submit(w1_dim, i) for i in range(d)]
-        for f in as_completed(futures):
-            total += f.result()
-
-    return total / float(d)
+    return emd_score / float(d)
 
 
 #######################################################################################################
-# PAIRWISE WASSERSTEIN MATRIX (FULL DATASET, STREAMED)
+# SINGLE PAIR DISTANCE
 #######################################################################################################
-def compute_pairwise_emd_matrix(
-    student,
-    drugs: List[str],
-    cfg: Dict,
-    device: str = "cuda",
-    batch_size: int = 128,
-    n_threads: int = 16,
-    normalize: bool = False,
-):
+def compute_pair_distance(args_tuple):
+
+    cls1, cls2, embeddings, q_cls, normalize = args_tuple
+
+    q_cls_np = np.asarray(q_cls)
+
+    mask1 = (q_cls_np == cls1)
+    mask2 = (q_cls_np == cls2)
+
+    emb_A = embeddings[mask1]
+    emb_B = embeddings[mask2]
+
+    distance = mean_emd(emb_A, emb_B, normalize=normalize)
+    return (cls1, cls2), distance
+
+
+#######################################################################################################
+# EVALUATION ENTRY POINT (CALLED FROM MAIN)
+#######################################################################################################
+def evaluate_dino_experiment(cfg: Dict):
+
+    multiprocessing.set_start_method("spawn", force=True)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    results_root = str(cfg.get("results_root", "./Results/DINO_default"))
+    ensure_dir(results_root)
+    ckpt = os.path.join(results_root, "checkpoints", "final_weights.pth")
+
+    student = load_trained_student(ckpt, cfg, device=device)
+
+    drugs = load_drug_list(cfg["label_path"])
 
     valid_drugs = []
     folder_list = []
 
-    # Resolve drug -> folder
     for drug in drugs:
         folder = get_npy_folder_from_drug(drug, cfg)
         if folder is not None:
@@ -163,83 +169,51 @@ def compute_pairwise_emd_matrix(
             folder_list.append(folder)
 
     D = len(valid_drugs)
-    M = np.zeros((D, D), dtype=np.float32)
 
-    for i in tqdm(range(D), desc="Outer loop"):
+    all_embeddings = []
+    q_cls = []
 
-        # Embed drug i (ALL cells, streamed)
-        A = compute_embeddings_for_drug_folder(
+    for i, folder in enumerate(tqdm(folder_list, desc="Embedding drugs")):
+        Z = compute_embeddings_for_drug_folder(
             student,
-            folder_list[i],
+            folder,
             device=device,
-            batch_size=batch_size,
+            batch_size=128,
+        )
+        all_embeddings.append(Z)
+        q_cls.extend([i] * Z.shape[0])
+
+    embeddings = torch.cat(all_embeddings, dim=0)
+    q_cls = np.array(q_cls)
+
+    unique_classes = list(range(D))
+    all_class_pairs = list(combinations(unique_classes, 2))
+
+    assigned_pairs = all_class_pairs
+
+    worker_args = [
+        (cls1, cls2, embeddings, q_cls, False)
+        for cls1, cls2 in assigned_pairs
+    ]
+
+    dist_dict = {(cls, cls): 0.0 for cls in unique_classes}
+
+    with Pool(processes=10) as pool:
+        results = list(
+            tqdm(
+                pool.imap(compute_pair_distance, worker_args),
+                total=len(worker_args),
+                desc="Computing EMD"
+            )
         )
 
-        for j in range(i, D):
+    for (cls1, cls2), distance in results:
+        dist_dict[(cls1, cls2)] = distance
+        dist_dict[(cls2, cls1)] = distance
 
-            B = compute_embeddings_for_drug_folder(
-                student,
-                folder_list[j],
-                device=device,
-                batch_size=batch_size,
-            )
+    out_file = os.path.join(results_root, "emd_distances_not_normalized_part0.pkl")
 
-            dist = marginal_wasserstein_multithread(
-                A, B, normalize=normalize, n_threads=n_threads
-            )
+    with open(out_file, "wb") as f:
+        pickle.dump(dist_dict, f)
 
-            M[i, j] = M[j, i] = dist
-
-            del B
-            torch.cuda.empty_cache()
-
-        del A
-        torch.cuda.empty_cache()
-
-    return valid_drugs, M
-
-
-#######################################################################################################
-# SAVE CSV
-#######################################################################################################
-def save_distance_matrix(matrix, labels, output_csv):
-
-    with open(output_csv, "w") as f:
-        f.write("," + ",".join(labels) + "\n")
-        for label, row in zip(labels, matrix):
-            f.write(label + "," + ",".join(str(float(x)) for x in row) + "\n")
-
-
-#######################################################################################################
-# MAIN ENTRY POINT
-#######################################################################################################
-def evaluate_dino_experiment(cfg: Dict):
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    results_root = str(cfg.get("results_root", "./Results/DINO_default"))
-    ensure_dir(results_root)
-
-    ckpt = os.path.join(results_root, "checkpoints", "final_weights.pth")
-
-    drugs = load_drug_list(cfg["label_path"])
-
-    print(f"[Eval] Loading student from {ckpt}")
-    student = load_trained_student(ckpt, cfg, device=device)
-
-    labels, matrix = compute_pairwise_emd_matrix(
-        student=student,
-        drugs=drugs,
-        cfg=cfg,
-        device=device,
-        batch_size=128,   # GPU memory bounded here
-        n_threads=16,
-        normalize=False,
-    )
-
-    out_csv = os.path.join(results_root, "drug_emd_distance_matrix.csv")
-    save_distance_matrix(matrix, labels, out_csv)
-
-    print(f"[Eval] Saved distance matrix to {out_csv}")
-
-    return matrix, labels
+    return dist_dict, valid_drugs
