@@ -1,6 +1,5 @@
 import os
-import sys
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import torch
@@ -18,6 +17,7 @@ from SSL.utils import ensure_dir
 # TRAINED STUDENT LOADING
 #######################################################################################################
 def load_trained_student(checkpoint_path: str, cfg: Dict, device: str = "cuda"):
+
     patch_size = int(cfg.get("patch_size", 8))
     in_chans   = int(cfg.get("in_channels", 2))
     out_dim    = int(cfg.get("out_dim", 8192))
@@ -29,6 +29,7 @@ def load_trained_student(checkpoint_path: str, cfg: Dict, device: str = "cuda"):
     ckpt = torch.load(checkpoint_path, map_location=device)
     student.load_state_dict(ckpt["student_state_dict"], strict=True)
     student.eval()
+
     return student
 
 
@@ -44,61 +45,63 @@ def load_drug_list(csv_path: str) -> List[str]:
 # FIND FOLDER OF NPY FILES FOR A DRUG
 #######################################################################################################
 def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> str:
+
     df = pd.read_csv(cfg["label_path"], header=None, dtype=str)
 
-    # 1. Find row i where column 2 == drug
     matches = df[df.iloc[:, 2].str.strip() == drug_name.strip()]
     if len(matches) == 0:
         return None
 
-    # 2. Build path = data_root + df[i,0] + "/" + df[i,1]
     plate = matches.iloc[0, 0].strip()
     well  = matches.iloc[0, 1].strip()
 
     folder = os.path.join(cfg["data_root"], plate, well)
-
     return folder if os.path.isdir(folder) else None
 
 
 #######################################################################################################
-# LOAD ALL IMAGES (.NPY FILES)
+# STREAMING EMBEDDING EXTRACTION (USES ALL CELLS, BOUNDED MEMORY)
 #######################################################################################################
-def load_all_cells_for_drug(npy_folder: str) -> torch.Tensor:
+@torch.no_grad()
+def compute_embeddings_for_drug_folder(
+    student,
+    folder: str,
+    device: str = "cuda",
+    batch_size: int = 128,
+) -> np.ndarray:
     """
-    Read every .npy file in the folder.
-    Each file contains a (2,96,96) float32 cell array.
+    Streams all .npy files from disk in mini-batches.
+    Uses ALL cells without ever stacking the full dataset in RAM or GPU.
     """
 
     files = sorted(
-        f for f in os.listdir(npy_folder)
+        f for f in os.listdir(folder)
         if f.endswith(".npy")
     )
 
     if len(files) == 0:
-        return torch.empty(0, 2, 96, 96)
-
-    imgs = [np.load(os.path.join(npy_folder, f)).astype(np.float32)
-            for f in files]
-
-    arr = np.stack(imgs, axis=0)  
-    return torch.from_numpy(arr)
-
-
-#######################################################################################################
-# EMBEDDING EXTRACTION
-#######################################################################################################
-@torch.no_grad()
-def compute_embeddings_for_images(student, imgs: torch.Tensor, device="cuda", batch_size=128):
-    if imgs.numel() == 0:
         return np.zeros((0, 1), dtype=np.float32)
 
-    imgs = imgs.to(device)
-    out  = []
-    N    = imgs.shape[0]
+    out = []
+    N = len(files)
 
     for i in range(0, N, batch_size):
-        z = student.backbone(imgs[i:i+batch_size])
+
+        batch_files = files[i:i + batch_size]
+
+        batch = np.stack(
+            [np.load(os.path.join(folder, f)).astype(np.float32)
+             for f in batch_files],
+            axis=0
+        )  # (B, 2, 96, 96)
+
+        batch = torch.from_numpy(batch).to(device, non_blocking=True)
+
+        z = student.backbone(batch)
         out.append(z.cpu().numpy())
+
+        del batch
+        torch.cuda.empty_cache()
 
     return np.concatenate(out, axis=0)
 
@@ -106,10 +109,12 @@ def compute_embeddings_for_images(student, imgs: torch.Tensor, device="cuda", ba
 #######################################################################################################
 # 1D MULTI-THREADED MARGINAL WASSERSTEIN DISTANCE
 #######################################################################################################
-def marginal_wasserstein_multithread(A: np.ndarray,
-                                     B: np.ndarray,
-                                     normalize: bool = False,
-                                     n_threads: int = 16) -> float:
+def marginal_wasserstein_multithread(
+    A: np.ndarray,
+    B: np.ndarray,
+    normalize: bool = False,
+    n_threads: int = 16,
+) -> float:
 
     if normalize:
         A = F.normalize(torch.from_numpy(A), p=2, dim=1).numpy()
@@ -135,20 +140,22 @@ def marginal_wasserstein_multithread(A: np.ndarray,
 
 
 #######################################################################################################
-# PAIRWISE WASSERSTEIN MATRIX
+# PAIRWISE WASSERSTEIN MATRIX (FULL DATASET, STREAMED)
 #######################################################################################################
-def compute_pairwise_emd_matrix(student,
-                                drugs: List[str],
-                                cfg: Dict,
-                                device="cuda",
-                                batch_size=128,
-                                n_threads=16,
-                                normalize=False):
+def compute_pairwise_emd_matrix(
+    student,
+    drugs: List[str],
+    cfg: Dict,
+    device: str = "cuda",
+    batch_size: int = 128,
+    n_threads: int = 16,
+    normalize: bool = False,
+):
 
     valid_drugs = []
     folder_list = []
 
-    # resolve all drugs → folder paths
+    # Resolve drug -> folder
     for drug in drugs:
         folder = get_npy_folder_from_drug(drug, cfg)
         if folder is not None:
@@ -158,23 +165,35 @@ def compute_pairwise_emd_matrix(student,
     D = len(valid_drugs)
     M = np.zeros((D, D), dtype=np.float32)
 
-    # Main loop
     for i in tqdm(range(D), desc="Outer loop"):
-        imgs_i = load_all_cells_for_drug(folder_list[i])
-        A = compute_embeddings_for_images(student, imgs_i, device=device, batch_size=batch_size)
+
+        # Embed drug i (ALL cells, streamed)
+        A = compute_embeddings_for_drug_folder(
+            student,
+            folder_list[i],
+            device=device,
+            batch_size=batch_size,
+        )
 
         for j in range(i, D):
-            imgs_j = load_all_cells_for_drug(folder_list[j])
-            B = compute_embeddings_for_images(student, imgs_j, device=device, batch_size=batch_size)
+
+            B = compute_embeddings_for_drug_folder(
+                student,
+                folder_list[j],
+                device=device,
+                batch_size=batch_size,
+            )
+
             dist = marginal_wasserstein_multithread(
                 A, B, normalize=normalize, n_threads=n_threads
             )
 
             M[i, j] = M[j, i] = dist
 
-            del imgs_j, B
+            del B
+            torch.cuda.empty_cache()
 
-        del imgs_i, A
+        del A
         torch.cuda.empty_cache()
 
     return valid_drugs, M
@@ -184,6 +203,7 @@ def compute_pairwise_emd_matrix(student,
 # SAVE CSV
 #######################################################################################################
 def save_distance_matrix(matrix, labels, output_csv):
+
     with open(output_csv, "w") as f:
         f.write("," + ",".join(labels) + "\n")
         for label, row in zip(labels, matrix):
@@ -194,6 +214,7 @@ def save_distance_matrix(matrix, labels, output_csv):
 # MAIN ENTRY POINT
 #######################################################################################################
 def evaluate_dino_experiment(cfg: Dict):
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     results_root = str(cfg.get("results_root", "./Results/DINO_default"))
@@ -211,13 +232,14 @@ def evaluate_dino_experiment(cfg: Dict):
         drugs=drugs,
         cfg=cfg,
         device=device,
-        batch_size=128,
+        batch_size=128,   # GPU memory bounded here
         n_threads=16,
-        normalize=False
+        normalize=False,
     )
 
     out_csv = os.path.join(results_root, "drug_emd_distance_matrix.csv")
     save_distance_matrix(matrix, labels, out_csv)
+
     print(f"[Eval] Saved distance matrix to {out_csv}")
 
     return matrix, labels

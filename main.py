@@ -109,7 +109,7 @@ def main():
 
         print(f"Loaded experiment config from {yaml_path}")
 
-        run_dino_experiment(cfg)
+        #run_dino_experiment(cfg)
         evaluate_dino_experiment(cfg)
 
 
