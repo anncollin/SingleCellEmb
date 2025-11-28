@@ -153,7 +153,6 @@ def train_one_epoch(
     # ---- HARD-CODE: USE ONLY 10% OF DATASET PER EPOCH ----
     total_batches = len(dataloader)
     max_batches = max(1, int(0.1 * total_batches))
-    max_batches =10
     # --------------------------------------------------------
 
     dataloader = tqdm(dataloader, desc=f"Epoch {epoch+1}", ncols=100, disable=use_wandb)
