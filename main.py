@@ -84,11 +84,13 @@ def main():
             print("you are on local machine")
             cfg["data_root"]  = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB_npy/"
             cfg["label_path"] = "/home/anncollin/Desktop/Nucleoles/dataset/labels/unique_drugs.csv"
+            cfg["callibration_path"] = "/home/anncollin/Desktop/Nucleoles/dataset/labels/callibration.csv"
 
         elif "orion" in hostname:
             print("you are on orion")
             cfg["data_root"]  = "/DATA/annso/MyDB_npy"
             cfg["label_path"] = "/DATA/annso/labels/unique_drugs.csv"
+            cfg["callibration_path"] = "/DATA/annso/labels/callibration.csv"
 
         else:
             raise RuntimeError(
@@ -110,7 +112,7 @@ def main():
         print(f"Loaded experiment config from {yaml_path}")
 
         run_dino_experiment(cfg)
-        #evaluate_dino_experiment(cfg)
+        evaluate_dino_experiment(cfg)
 
 
 if __name__ == "__main__":
