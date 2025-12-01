@@ -15,18 +15,32 @@ from SSL.eval_dino import evaluate_dino_experiment
 #######################################################################################################
 def parse_args():
     parser = argparse.ArgumentParser(description="Run DINO experiment(s) from YAML file or directory.")
+
     parser.add_argument(
         "--todo",
         type=str,
         required=True,
         help="Path to a YAML file OR a directory containing multiple YAML files.",
     )
+
     parser.add_argument(
         "--wandb",
-        type=str,
-        default="false",
-        help="Enable or disable wandb logging (true/false).",
+        action="store_true",
+        help="Enable wandb logging (default: disabled).",
     )
+
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="Run only the training (run_dino_experiment).",
+    )
+
+    parser.add_argument(
+        "--eval",
+        action="store_true",
+        help="Run only the evaluation (evaluate_dino_experiment).",
+    )
+
     return parser.parse_args()
 
 
@@ -82,13 +96,13 @@ def main():
 
         if "anncollin" in hostname:
             print("you are on local machine")
-            cfg["data_root"]  = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB_npy/"
+            cfg["data_root"] = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB_npy/"
             cfg["label_path"] = "/home/anncollin/Desktop/Nucleoles/dataset/labels/unique_drugs.csv"
             cfg["callibration_path"] = "/home/anncollin/Desktop/Nucleoles/dataset/labels/callibration.csv"
 
         elif "orion" in hostname:
             print("you are on orion")
-            cfg["data_root"]  = "/DATA/annso/MyDB_npy"
+            cfg["data_root"] = "/DATA/annso/MyDB_npy"
             cfg["label_path"] = "/DATA/annso/labels/unique_drugs.csv"
             cfg["callibration_path"] = "/DATA/annso/labels/callibration.csv"
 
@@ -100,19 +114,29 @@ def main():
         # ----------------------------------------------------------------------
 
         # ----------------------------------------------------------------------
-        # HANDLE WANDB OPTION FROM COMMAND LINE
+        # HANDLE WANDB FLAG
         # ----------------------------------------------------------------------
-        wandb_arg = args.wandb.lower()
-        if wandb_arg in ["true", "1", "yes"]:
-            cfg["use_wandb"] = True
-        else:
-            cfg["use_wandb"] = False
+        cfg["use_wandb"] = bool(args.wandb)
+        print(f"wandb enabled: {cfg['use_wandb']}")
         # ----------------------------------------------------------------------
 
         print(f"Loaded experiment config from {yaml_path}")
 
-        run_dino_experiment(cfg)
-        evaluate_dino_experiment(cfg)
+        do_train = args.train
+        do_eval  = args.eval
+
+        # Default behavior: if neither flag is given, run both
+        if not do_train and not do_eval:
+            do_train = True
+            do_eval = True
+
+        if do_train:
+            print("Starting TRAIN phase...")
+            run_dino_experiment(cfg)
+
+        if do_eval:
+            print("Starting EVAL phase...")
+            evaluate_dino_experiment(cfg)
 
 
 if __name__ == "__main__":
