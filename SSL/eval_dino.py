@@ -63,7 +63,7 @@ def load_drug_list(csv_path: str) -> List[str]:
 # =====================================================================================================
 def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> str:
 
-    df = pd.read_csv(cfg["callibration_path"], header=None, dtype=str)
+    df = pd.read_csv(cfg["label_path"], header=None, dtype=str)
 
     matches = df[df.iloc[:, 2].str.strip() == drug_name.strip()]
     if len(matches) == 0:
