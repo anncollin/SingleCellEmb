@@ -1,9 +1,8 @@
 import os
 import time
 import pickle
-import multiprocessing
 from typing import Dict, List
-from itertools import combinations
+from itertools import combinations  # kept in case you want to reuse, but not needed now
 
 import numpy as np
 import pandas as pd
@@ -81,8 +80,7 @@ def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_siz
         batch_files = files[i:i + batch_size]
 
         batch = np.stack(
-            [np.load(os.path.join(folder, f)).astype(np.float32)
-             for f in batch_files],
+            [np.load(os.path.join(folder, f)).astype(np.float32) for f in batch_files],
             axis=0
         )
 
@@ -91,12 +89,13 @@ def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_siz
         out.append(z.cpu())
 
         del batch
+        torch.cuda.empty_cache()
 
     return torch.cat(out, dim=0)
 
 
 #######################################################################################################
-# MEAN MARGINAL EMD
+# MEAN MARGINAL EMD (NUMPY VERSION)
 #######################################################################################################
 def mean_emd_numpy(emb_A: np.ndarray,
                    emb_B: np.ndarray,
@@ -105,158 +104,23 @@ def mean_emd_numpy(emb_A: np.ndarray,
     d = emb_A.shape[1]
 
     if normalize:
-        emb_A = F.normalize(torch.from_numpy(emb_A), p=2, dim=1).numpy()
-        emb_B = F.normalize(torch.from_numpy(emb_B), p=2, dim=1).numpy()
+        emb_A_t = F.normalize(torch.from_numpy(emb_A), p=2, dim=1).numpy()
+        emb_B_t = F.normalize(torch.from_numpy(emb_B), p=2, dim=1).numpy()
+    else:
+        emb_A_t = emb_A
+        emb_B_t = emb_B
 
     score = 0.0
     for i in range(d):
-        score += wasserstein_distance(emb_A[:, i], emb_B[:, i])
+        score += wasserstein_distance(emb_A_t[:, i], emb_B_t[:, i])
 
     return score / float(d)
 
 
 #######################################################################################################
-# HYBRID WORKER (ONE PROCESS + MULTI-THREADING)
-#######################################################################################################
-def hybrid_worker(proc_id,
-                  n_processes,
-                  class_embeddings,
-                  unique_classes,
-                  results_root,
-                  normalize,
-                  n_threads):
-
-    def compute_row(cls1: int):
-        emb_A = class_embeddings[cls1]
-        row_results = []
-
-        for cls2 in unique_classes:
-            if cls2 <= cls1:
-                continue
-            emb_B = class_embeddings[cls2]
-            dist = mean_emd_numpy(emb_A, emb_B, normalize=normalize)
-            row_results.append(((cls1, cls2), dist))
-
-        return row_results
-
-    assigned_rows = [
-        cls for i, cls in enumerate(unique_classes)
-        if i % n_processes == proc_id
-    ]
-
-    print(f"[Process {proc_id}] Assigned {len(assigned_rows)} rows")
-
-    results = []
-
-    with ThreadPoolExecutor(max_workers=n_threads) as executor:
-
-        futures = {
-            executor.submit(compute_row, cls): cls
-            for cls in assigned_rows
-        }
-
-        for future in tqdm(as_completed(futures),
-                           total=len(futures),
-                           desc=f"Process {proc_id}"):
-            results.extend(future.result())
-
-    out_file = os.path.join(results_root, f"emd_block_proc{proc_id}.pkl")
-
-    with open(out_file, "wb") as f:
-        pickle.dump(results, f)
-
-    print(f"[Process {proc_id}] Saved {len(results)} distances")
-
-
-#######################################################################################################
-# HYBRID BENCHMARK
-#######################################################################################################
-def benchmark_hybrid(class_embeddings,
-                     unique_classes,
-                     results_root,
-                     normalize=False,
-                     max_processes=4,
-                     max_threads=8):
-
-    benchmark_results = []
-
-    print("\n================ HYBRID BENCHMARK START ================\n")
-
-    for n_processes in range(1, max_processes + 1):
-        for n_threads in range(1, max_threads + 1):
-
-            print(f"\nBenchmarking: {n_processes} process(es) × {n_threads} thread(s)")
-
-            t0 = time.perf_counter()
-            processes = []
-
-            for pid in range(n_processes):
-                p = multiprocessing.Process(
-                    target=hybrid_worker,
-                    args=(
-                        pid,
-                        n_processes,
-                        class_embeddings,
-                        unique_classes,
-                        results_root,
-                        normalize,
-                        n_threads,
-                    )
-                )
-                p.start()
-                processes.append(p)
-
-            for p in processes:
-                p.join()
-
-            t1 = time.perf_counter()
-
-            total_time = t1 - t0
-            n_pairs = len(unique_classes) * (len(unique_classes) - 1) / 2.0
-            mean_time = total_time / n_pairs if n_pairs > 0 else float("nan")
-
-            benchmark_results.append({
-                "processes": n_processes,
-                "threads": n_threads,
-                "total_time": total_time,
-                "mean_time": mean_time,
-            })
-
-            print(
-                f"Processes: {n_processes:2d} | "
-                f"Threads: {n_threads:2d} | "
-                f"Total: {total_time:8.3f} s | "
-                f"Mean: {mean_time:.6f} s"
-            )
-
-    print("\n================ HYBRID BENCHMARK SUMMARY ================\n")
-
-    best = min(benchmark_results, key=lambda x: x["total_time"])
-
-    for r in benchmark_results:
-        print(
-            f"P={r['processes']:2d} | "
-            f"T={r['threads']:2d} | "
-            f"Total={r['total_time']:8.3f} s | "
-            f"Mean={r['mean_time']:.6f} s"
-        )
-
-    print("\n================ BEST CONFIGURATION ================\n")
-    print(
-        f"Best: {best['processes']} process(es) × {best['threads']} thread(s)\n"
-        f"Total time: {best['total_time']:.3f} s\n"
-        f"Mean time: {best['mean_time']:.6f} s"
-    )
-
-    return benchmark_results, best
-
-
-#######################################################################################################
-# MAIN EVALUATION ENTRY POINT
+# MAIN EVALUATION (SINGLE PROCESS + MULTITHREADING)
 #######################################################################################################
 def evaluate_dino_experiment(cfg: Dict):
-
-    multiprocessing.set_start_method("spawn", force=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -321,9 +185,11 @@ def evaluate_dino_experiment(cfg: Dict):
         print("Cached embeddings saved.")
 
     # ----------------------------------------------------------------------------------
-    # BUILD PER-CLASS EMBEDDINGS
+    # BUILD PER-CLASS EMBEDDINGS (ONE BLOCK PER DRUG)
     # ----------------------------------------------------------------------------------
-    emb_np = embeddings.numpy()
+    print("Building per-class embedding blocks for threading...")
+    emb_np = embeddings.numpy()  # embeddings are on CPU already
+
     unique_classes = list(range(D))
     class_embeddings = {}
 
@@ -331,24 +197,111 @@ def evaluate_dino_experiment(cfg: Dict):
         mask = (q_cls == cls)
         class_embeddings[cls] = emb_np[mask]
 
-    # ----------------------------------------------------------------------------------
-    # RUN HYBRID BENCHMARK
-    # ----------------------------------------------------------------------------------
-    hostname = os.uname().nodename
-    if "orion" in hostname:
-        max_processes = 4
-        max_threads = 6
-    else:
-        max_processes = 3
-        max_threads = 6
+    print(f"Built {len(class_embeddings)} class embedding blocks.")
 
-    benchmark_results, best_cfg = benchmark_hybrid(
-        class_embeddings=class_embeddings,
-        unique_classes=unique_classes,
-        results_root=results_root,
-        normalize=False,
-        max_processes=max_processes,
-        max_threads=max_threads,
-    )
+    # ----------------------------------------------------------------------------------
+    # THREADED PAIRWISE EMD (ONE THREAD PER 'ROW' OF THE MATRIX)
+    # ----------------------------------------------------------------------------------
+    def compute_row_distances(cls1: int):
+        emb_A = class_embeddings[cls1]
+        row_results = []
 
-    return benchmark_results, best_cfg, valid_drugs
+        for cls2 in unique_classes:
+            if cls2 <= cls1:
+                continue
+            emb_B = class_embeddings[cls2]
+            dist = mean_emd_numpy(emb_A, emb_B, normalize=False)
+            row_results.append(((cls1, cls2), dist))
+
+        return row_results
+
+
+    max_threads = min(12, os.cpu_count() or 1)
+    thread_times = {}
+
+    print(f"\nBenchmarking thread counts from 1 to {max_threads}...\n")
+
+    for n_threads in range(1, max_threads + 1):
+
+        print(f"Benchmarking with {n_threads} thread(s)...")
+
+        t0 = time.perf_counter()
+        results_tmp = []
+
+        with ThreadPoolExecutor(max_workers=n_threads) as executor:
+            future_to_cls = {
+                executor.submit(compute_row_distances, cls1): cls1
+                for cls1 in unique_classes
+            }
+
+            for future in as_completed(future_to_cls):
+                results_tmp.extend(future.result())
+
+        t1 = time.perf_counter()
+
+        total_time = t1 - t0
+        mean_time = total_time / (D * (D - 1) / 2)
+
+        thread_times[n_threads] = (total_time, mean_time)
+
+        print(
+            f"Threads: {n_threads:2d} | "
+            f"Total: {total_time:8.3f} s | "
+            f"Mean: {mean_time:.6f} s"
+        )
+
+
+    # ----------------------------------------------------------------------------------
+    # SELECT BEST THREAD COUNT
+    # ----------------------------------------------------------------------------------
+    print("\n================ THREAD BENCHMARK SUMMARY ================\n")
+
+    best_threads = None
+    best_time = float("inf")
+
+    for n_threads in thread_times:
+        t, m = thread_times[n_threads]
+        print(f"Threads: {n_threads:2d} | Total: {t:8.3f} s | Mean: {m:.6f} s")
+
+        if t < best_time:
+            best_time = t
+            best_threads = n_threads
+
+    print("\n========================================================")
+    print(f"Best thread count: {best_threads}")
+    print(f"Best total time:   {best_time:.3f} s")
+    print("========================================================\n")
+
+
+    # ----------------------------------------------------------------------------------
+    # FINAL RUN WITH BEST THREAD COUNT
+    # ----------------------------------------------------------------------------------
+    print(f"Running final EMD computation with {best_threads} threads...")
+
+    dist_dict = {(cls, cls): 0.0 for cls in unique_classes}
+
+    t0 = time.perf_counter()
+    final_results = []
+
+    with ThreadPoolExecutor(max_workers=best_threads) as executor:
+        future_to_cls = {
+            executor.submit(compute_row_distances, cls1): cls1
+            for cls1 in unique_classes
+        }
+
+        for future in tqdm(as_completed(future_to_cls),
+                        total=len(future_to_cls),
+                        desc="Computing EMD (final)"):
+            final_results.extend(future.result())
+
+    t1 = time.perf_counter()
+
+    total_time = t1 - t0
+    mean_time = total_time / (D * (D - 1) / 2)
+
+    print(f"\nFINAL EMD TIME: {total_time:.3f} s")
+    print(f"FINAL MEAN PER DISTANCE: {mean_time:.6f} s\n")
+
+    for (cls1, cls2), dist in final_results:
+        dist_dict[(cls1, cls2)] = dist
+        dist_dict[(cls2, cls1)] = dist
