@@ -19,36 +19,51 @@ from SSL.utils import update_teacher, ensure_dir, save_checkpoint
 
 
 #######################################################################################################
-# COMPUTE SILHOUETTE SCORE (GPU MULTI-CROP COMPATIBLE)
+# COMPUTE SILHOUETTE SCORE (FAIL-SAFE VERSION)
 #######################################################################################################
 @torch.no_grad()
 def compute_silhouette(student, dataset, gpu_transform, device="cuda", num_samples=500):
 
-    student.eval()
+    try:
+        student.eval()
 
-    N = min(num_samples, len(dataset))
-    idxs = random.sample(range(len(dataset)), N)
+        N = min(num_samples, len(dataset))
+        if N < 2:
+            print("Warning: Not enough samples for silhouette score.")
+            return float("nan")
 
-    embeddings = []
-    labels = []
+        idxs = random.sample(range(len(dataset)), N)
 
-    for idx in idxs:
+        embeddings = []
+        labels = []
 
-        img = dataset[idx].unsqueeze(0).to(device)
+        for idx in idxs:
 
-        crops = gpu_transform(img)
-        img = crops[0]
+            img = dataset[idx].unsqueeze(0).to(device)
 
-        z = student.backbone(img).squeeze(0).cpu().numpy()
-        embeddings.append(z)
+            crops = gpu_transform(img)
+            img = crops[0]
 
-        path = dataset.npy_files[random.randrange(len(dataset.npy_files))]
-        labels.append(1 if "siRNA" in path else 0)
+            z = student.backbone(img).squeeze(0).cpu().numpy()
+            embeddings.append(z)
 
-    embeddings = np.stack(embeddings)
-    labels = np.array(labels)
+            path = dataset.npy_files[random.randrange(len(dataset.npy_files))]
+            labels.append(1 if "siRNA" in path else 0)
 
-    return silhouette_score(embeddings, labels)
+        embeddings = np.stack(embeddings)
+        labels = np.array(labels)
+
+        # Silhouette requires at least 2 distinct labels
+        if len(np.unique(labels)) < 2:
+            print("Warning: Only one class present in silhouette labels.")
+            return float("nan")
+
+        return silhouette_score(embeddings, labels)
+
+    except Exception as e:
+        print(f"Warning: Silhouette computation failed: {str(e)}")
+        return float("nan")
+
 
 
 #######################################################################################################
