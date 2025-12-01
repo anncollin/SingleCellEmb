@@ -225,7 +225,12 @@ def evaluate_dino_experiment(cfg: Dict):
 
     dist_dict = {(cls, cls): 0.0 for cls in unique_classes}
 
-    cpu_count = os.cpu_count()
+    hostname = os.uname().nodename
+    if "orion" in hostname:
+        cpu_count = os.cpu_count()   # full parallel
+    else:
+        cpu_count = 1  
+
     print(f"Using {cpu_count} CPU processes for EMD")
 
     print("Starting EMD computation...")

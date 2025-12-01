@@ -9,6 +9,7 @@ import random
 import numpy as np
 from sklearn.metrics import silhouette_score
 import wandb
+wandb.finish()
 
 from Dataset.data_loader import CellDataset
 from SSL.transforms import KorniaMultiCropTransform
@@ -198,7 +199,7 @@ def run_dino_experiment(cfg: Dict):
 
     if use_wandb:
         wandb.init(project="DINO", name=cfg.get("experiment_name", "DINO_run"))
-        wandb.config.update(cfg)
+        wandb.config.update(cfg, allow_val_change=True)
     else:
         print("Running WITHOUT wandb logging.")
 
