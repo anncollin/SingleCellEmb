@@ -236,6 +236,7 @@ def evaluate_dino_experiment(cfg: Dict):
 
     print("Starting EMD computation...")
 
+    """
     t0 = time.perf_counter()
 
     with Pool(
@@ -259,6 +260,72 @@ def evaluate_dino_experiment(cfg: Dict):
 
     print(f"Total EMD computation time: {total_time:.3f} s")
     print(f"Mean time per distance: {mean_time:.6f} s")
+    """
+
+    cpu_times = {}
+
+    for cpu_count in range(1, 13):
+
+        print(f"\nBenchmarking with {cpu_count} CPU(s)...")
+        
+        t0 = time.perf_counter()
+
+        with Pool(
+            processes=cpu_count,
+            initializer=init_worker,
+            initargs=(embeddings, q_cls),
+        ) as pool:
+
+            results = list(
+                tqdm(
+                    pool.imap(compute_pair_distance, worker_args, chunksize=20),
+                    total=len(worker_args),
+                    desc=f"Computing EMD ({cpu_count} CPU)",
+                )
+            )
+
+        t1 = time.perf_counter()
+
+        total_time = t1 - t0
+        mean_time = total_time / float(len(worker_args))
+
+        cpu_times[cpu_count] = {
+            "total_time": total_time,
+            "mean_time": mean_time,
+        }
+
+        print(f"CPUs: {cpu_count:2d} | Total time: {total_time:.3f} s | Mean: {mean_time:.6f} s")
+
+
+    # ----------------------------------------------------------------------------------
+    # FINAL SUMMARY
+    # ----------------------------------------------------------------------------------
+    print("\n================ CPU BENCHMARK SUMMARY ================\n")
+
+    best_cpu = None
+    best_time = float("inf")
+
+    for cpu_count in sorted(cpu_times):
+        t = cpu_times[cpu_count]["total_time"]
+        m = cpu_times[cpu_count]["mean_time"]
+
+        print(
+            f"CPUs: {cpu_count:2d} | "
+            f"Total: {t:8.3f} s | "
+            f"Mean: {m:.6f} s"
+        )
+
+        if t < best_time:
+            best_time = t
+            best_cpu = cpu_count
+
+    print("\n======================================================")
+    print(f"Best CPU count: {best_cpu}")
+    print(f"Best total time: {best_time:.3f} s")
+    print("======================================================\n")
+
+
+
 
     for (cls1, cls2), dist in results:
         dist_dict[(cls1, cls2)] = dist
