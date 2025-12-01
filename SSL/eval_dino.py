@@ -228,6 +228,7 @@ def evaluate_dino_experiment(cfg: Dict):
     hostname = os.uname().nodename
     if "orion" in hostname:
         cpu_count = os.cpu_count()   # full parallel
+        cpu_count = 1
     else:
         cpu_count = 1  
 
