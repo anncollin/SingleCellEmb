@@ -1,10 +1,8 @@
 import os
 import time
 import pickle
-import multiprocessing
 from typing import Dict, List
-from itertools import combinations
-from multiprocessing import Pool
+from itertools import combinations  # kept in case you want to reuse, but not needed now
 
 import numpy as np
 import pandas as pd
@@ -12,36 +10,24 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from scipy.stats import wasserstein_distance
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from SSL.model import create_vit_small_backbone, DINOHead, DINOStudent
 from SSL.utils import ensure_dir
 
 
-# =====================================================================================================
-# GLOBAL SHARED MEMORY FOR MULTIPROCESSING
-# =====================================================================================================
-GLOBAL_EMB = None
-GLOBAL_QCLS = None
-
-
-def init_worker(embeddings, q_cls):
-    global GLOBAL_EMB, GLOBAL_QCLS
-    GLOBAL_EMB = embeddings
-    GLOBAL_QCLS = q_cls
-
-
-# =====================================================================================================
+#######################################################################################################
 # LOAD TRAINED STUDENT
-# =====================================================================================================
+#######################################################################################################
 def load_trained_student(checkpoint_path: str, cfg: Dict, device: str = "cuda"):
 
     patch_size = int(cfg.get("patch_size", 8))
-    in_chans = int(cfg.get("in_channels", 2))
-    out_dim = int(cfg.get("out_dim", 8192))
+    in_chans   = int(cfg.get("in_channels", 2))
+    out_dim    = int(cfg.get("out_dim", 8192))
 
     backbone = create_vit_small_backbone(patch_size=patch_size, in_chans=in_chans)
-    head = DINOHead(in_dim=backbone.num_features, out_dim=out_dim)
-    student = DINOStudent(backbone, head).to(device)
+    head     = DINOHead(in_dim=backbone.num_features, out_dim=out_dim)
+    student  = DINOStudent(backbone, head).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device)
     student.load_state_dict(ckpt["student_state_dict"], strict=True)
@@ -50,17 +36,17 @@ def load_trained_student(checkpoint_path: str, cfg: Dict, device: str = "cuda"):
     return student
 
 
-# =====================================================================================================
+#######################################################################################################
 # LOAD DRUG LIST
-# =====================================================================================================
+#######################################################################################################
 def load_drug_list(csv_path: str) -> List[str]:
     df = pd.read_csv(csv_path, header=None)
     return df.iloc[:, 2].astype(str).str.strip().tolist()
 
 
-# =====================================================================================================
+#######################################################################################################
 # MAP DRUG -> FOLDER
-# =====================================================================================================
+#######################################################################################################
 def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> str:
 
     df = pd.read_csv(cfg["label_path"], header=None, dtype=str)
@@ -70,15 +56,15 @@ def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> str:
         return None
 
     plate = matches.iloc[0, 0].strip()
-    well = matches.iloc[0, 1].strip()
+    well  = matches.iloc[0, 1].strip()
 
     folder = os.path.join(cfg["data_root"], plate, well)
     return folder if os.path.isdir(folder) else None
 
 
-# =====================================================================================================
+#######################################################################################################
 # EMBEDDING COMPUTATION
-# =====================================================================================================
+#######################################################################################################
 @torch.no_grad()
 def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_size=128):
 
@@ -108,50 +94,33 @@ def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_siz
     return torch.cat(out, dim=0)
 
 
-# =====================================================================================================
-# MEAN MARGINAL EMD
-# =====================================================================================================
-def mean_emd(emb_A, emb_B, normalize=False):
+#######################################################################################################
+# MEAN MARGINAL EMD (NUMPY VERSION)
+#######################################################################################################
+def mean_emd_numpy(emb_A: np.ndarray,
+                   emb_B: np.ndarray,
+                   normalize: bool = False) -> float:
 
     d = emb_A.shape[1]
 
     if normalize:
-        emb_A = F.normalize(emb_A, p=2, dim=1).numpy()
-        emb_B = F.normalize(emb_B, p=2, dim=1).numpy()
+        emb_A_t = F.normalize(torch.from_numpy(emb_A), p=2, dim=1).numpy()
+        emb_B_t = F.normalize(torch.from_numpy(emb_B), p=2, dim=1).numpy()
     else:
-        emb_A = emb_A.numpy()
-        emb_B = emb_B.numpy()
+        emb_A_t = emb_A
+        emb_B_t = emb_B
 
     score = 0.0
     for i in range(d):
-        score += wasserstein_distance(emb_A[:, i], emb_B[:, i])
+        score += wasserstein_distance(emb_A_t[:, i], emb_B_t[:, i])
 
     return score / float(d)
 
 
-# =====================================================================================================
-# SINGLE PAIR DISTANCE (MULTIPROCESS-SAFE)
-# =====================================================================================================
-def compute_pair_distance(args):
-
-    cls1, cls2 = args
-
-    mask1 = (GLOBAL_QCLS == cls1)
-    mask2 = (GLOBAL_QCLS == cls2)
-
-    emb_A = GLOBAL_EMB[mask1]
-    emb_B = GLOBAL_EMB[mask2]
-
-    dist = mean_emd(emb_A, emb_B, normalize=False)
-    return (cls1, cls2), dist
-
-
-# =====================================================================================================
-# MAIN EVALUATION
-# =====================================================================================================
+#######################################################################################################
+# MAIN EVALUATION (SINGLE PROCESS + MULTITHREADING)
+#######################################################################################################
 def evaluate_dino_experiment(cfg: Dict):
-
-    multiprocessing.set_start_method("spawn", force=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -163,7 +132,7 @@ def evaluate_dino_experiment(cfg: Dict):
 
     student = load_trained_student(ckpt, cfg, device=device)
 
-    drugs = load_drug_list(cfg["label_path"])
+    drugs = load_drug_list(cfg["callibration_path"])
 
     valid_drugs = []
     folder_list = []
@@ -216,124 +185,123 @@ def evaluate_dino_experiment(cfg: Dict):
         print("Cached embeddings saved.")
 
     # ----------------------------------------------------------------------------------
-    # PAIRWISE EMD (MULTIPROCESSING)
+    # BUILD PER-CLASS EMBEDDINGS (ONE BLOCK PER DRUG)
     # ----------------------------------------------------------------------------------
+    print("Building per-class embedding blocks for threading...")
+    emb_np = embeddings.numpy()  # embeddings are on CPU already
+
     unique_classes = list(range(D))
-    all_class_pairs = list(combinations(unique_classes, 2))
+    class_embeddings = {}
 
-    worker_args = [(cls1, cls2) for cls1, cls2 in all_class_pairs]
+    for cls in unique_classes:
+        mask = (q_cls == cls)
+        class_embeddings[cls] = emb_np[mask]
 
-    dist_dict = {(cls, cls): 0.0 for cls in unique_classes}
+    print(f"Built {len(class_embeddings)} class embedding blocks.")
 
-    hostname = os.uname().nodename
-    if "orion" in hostname:
-        cpu_count = os.cpu_count()   # full parallel
-        cpu_count = 6
-    else:
-        cpu_count = 1  
+    # ----------------------------------------------------------------------------------
+    # THREADED PAIRWISE EMD (ONE THREAD PER 'ROW' OF THE MATRIX)
+    # ----------------------------------------------------------------------------------
+    def compute_row_distances(cls1: int):
+        emb_A = class_embeddings[cls1]
+        row_results = []
 
-    print(f"Using {cpu_count} CPU processes for EMD")
+        for cls2 in unique_classes:
+            if cls2 <= cls1:
+                continue
+            emb_B = class_embeddings[cls2]
+            dist = mean_emd_numpy(emb_A, emb_B, normalize=False)
+            row_results.append(((cls1, cls2), dist))
 
-    print("Starting EMD computation...")
+        return row_results
 
-    """
-    t0 = time.perf_counter()
 
-    with Pool(
-        processes=cpu_count,
-        initializer=init_worker,
-        initargs=(embeddings, q_cls),
-    ) as pool:
+    max_threads = min(12, os.cpu_count() or 1)
+    thread_times = {}
 
-        results = list(
-            tqdm(
-                pool.imap(compute_pair_distance, worker_args, chunksize=20),
-                total=len(worker_args),
-                desc="Computing EMD"
-            )
-        )
+    print(f"\nBenchmarking thread counts from 1 to {max_threads}...\n")
 
-    t1 = time.perf_counter()
+    for n_threads in range(1, max_threads + 1):
 
-    total_time = t1 - t0
-    mean_time = total_time / float(len(worker_args))
+        print(f"Benchmarking with {n_threads} thread(s)...")
 
-    print(f"Total EMD computation time: {total_time:.3f} s")
-    print(f"Mean time per distance: {mean_time:.6f} s")
-    """
-
-    cpu_times = {}
-
-    for cpu_count in range(1, 13):
-
-        print(f"\nBenchmarking with {cpu_count} CPU(s)...")
-        
         t0 = time.perf_counter()
+        results_tmp = []
 
-        with Pool(
-            processes=cpu_count,
-            initializer=init_worker,
-            initargs=(embeddings, q_cls),
-        ) as pool:
+        with ThreadPoolExecutor(max_workers=n_threads) as executor:
+            future_to_cls = {
+                executor.submit(compute_row_distances, cls1): cls1
+                for cls1 in unique_classes
+            }
 
-            results = list(
-                tqdm(
-                    pool.imap(compute_pair_distance, worker_args, chunksize=20),
-                    total=len(worker_args),
-                    desc=f"Computing EMD ({cpu_count} CPU)",
-                )
-            )
+            for future in as_completed(future_to_cls):
+                results_tmp.extend(future.result())
 
         t1 = time.perf_counter()
 
         total_time = t1 - t0
-        mean_time = total_time / float(len(worker_args))
+        mean_time = total_time / (D * (D - 1) / 2)
 
-        cpu_times[cpu_count] = {
-            "total_time": total_time,
-            "mean_time": mean_time,
-        }
-
-        print(f"CPUs: {cpu_count:2d} | Total time: {total_time:.3f} s | Mean: {mean_time:.6f} s")
-
-
-    # ----------------------------------------------------------------------------------
-    # FINAL SUMMARY
-    # ----------------------------------------------------------------------------------
-    print("\n================ CPU BENCHMARK SUMMARY ================\n")
-
-    best_cpu = None
-    best_time = float("inf")
-
-    for cpu_count in sorted(cpu_times):
-        t = cpu_times[cpu_count]["total_time"]
-        m = cpu_times[cpu_count]["mean_time"]
+        thread_times[n_threads] = (total_time, mean_time)
 
         print(
-            f"CPUs: {cpu_count:2d} | "
-            f"Total: {t:8.3f} s | "
-            f"Mean: {m:.6f} s"
+            f"Threads: {n_threads:2d} | "
+            f"Total: {total_time:8.3f} s | "
+            f"Mean: {mean_time:.6f} s"
         )
+
+
+    # ----------------------------------------------------------------------------------
+    # SELECT BEST THREAD COUNT
+    # ----------------------------------------------------------------------------------
+    print("\n================ THREAD BENCHMARK SUMMARY ================\n")
+
+    best_threads = None
+    best_time = float("inf")
+
+    for n_threads in thread_times:
+        t, m = thread_times[n_threads]
+        print(f"Threads: {n_threads:2d} | Total: {t:8.3f} s | Mean: {m:.6f} s")
 
         if t < best_time:
             best_time = t
-            best_cpu = cpu_count
+            best_threads = n_threads
 
-    print("\n======================================================")
-    print(f"Best CPU count: {best_cpu}")
-    print(f"Best total time: {best_time:.3f} s")
-    print("======================================================\n")
-
-
+    print("\n========================================================")
+    print(f"Best thread count: {best_threads}")
+    print(f"Best total time:   {best_time:.3f} s")
+    print("========================================================\n")
 
 
-    for (cls1, cls2), dist in results:
+    # ----------------------------------------------------------------------------------
+    # FINAL RUN WITH BEST THREAD COUNT
+    # ----------------------------------------------------------------------------------
+    print(f"Running final EMD computation with {best_threads} threads...")
+
+    dist_dict = {(cls, cls): 0.0 for cls in unique_classes}
+
+    t0 = time.perf_counter()
+    final_results = []
+
+    with ThreadPoolExecutor(max_workers=best_threads) as executor:
+        future_to_cls = {
+            executor.submit(compute_row_distances, cls1): cls1
+            for cls1 in unique_classes
+        }
+
+        for future in tqdm(as_completed(future_to_cls),
+                        total=len(future_to_cls),
+                        desc="Computing EMD (final)"):
+            final_results.extend(future.result())
+
+    t1 = time.perf_counter()
+
+    total_time = t1 - t0
+    mean_time = total_time / (D * (D - 1) / 2)
+
+    print(f"\nFINAL EMD TIME: {total_time:.3f} s")
+    print(f"FINAL MEAN PER DISTANCE: {mean_time:.6f} s\n")
+
+    for (cls1, cls2), dist in final_results:
         dist_dict[(cls1, cls2)] = dist
         dist_dict[(cls2, cls1)] = dist
-
-    out_file = os.path.join(results_root, "emd_distances_not_normalized_part0.pkl")
-
-    with open(out_file, "wb") as f:
-        pickle.dump(dist_dict, f)
-
-    return dist_dict, valid_drugs
