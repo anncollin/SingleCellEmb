@@ -190,7 +190,7 @@ def evaluate_dino_experiment(cfg: Dict):
 
     student = load_trained_student(ckpt, cfg, device=device)
 
-    drugs = load_drug_list(cfg["callibration_path"])
+    drugs = load_drug_list(cfg["label_path"])
 
     valid_drugs = []
     folder_list = []
