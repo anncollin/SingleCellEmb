@@ -181,8 +181,9 @@ def evaluate_dino_experiment(cfg: Dict):
     multiprocessing.set_start_method("spawn", force=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    results_root = str(cfg.get("results_root", "./Results/DINO_default"))
+    
+    experiment_name = str(cfg.get("experiment_name", "DINO_experiment"))
+    results_root    = ensure_dir(f"./Results/{experiment_name}")
     ensure_dir(results_root)
 
     ckpt = os.path.join(results_root, "checkpoints", "final_weights.pth")
