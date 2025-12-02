@@ -158,7 +158,6 @@ def hybrid_worker(proc_id,
             res = future.result()
             results.extend(res)
 
-            # Global distance count update
             with global_counter.get_lock():
                 global_counter.value += len(res)
 
@@ -251,6 +250,8 @@ def evaluate_dino_experiment(cfg: Dict):
             all_embeddings.append(Z)
             q_cls.extend([i] * Z.shape[0])
 
+        embeddings = torch.cat(all_embeddings, dim=0)
+        q_cls = np.asarray(q_cls, dtype=np.int32)
 
         with open(emb_cache_path, "wb") as f:
             pickle.dump({"embeddings": embeddings, "q_cls": q_cls}, f)
@@ -269,13 +270,13 @@ def evaluate_dino_experiment(cfg: Dict):
         class_embeddings[cls] = emb_np[mask]
 
     # ----------------------------------------------------------------------------------
-    # RUN HYBRID COMPUTATION (HARD-CODED 3 PROCESSES × 3 THREADS)
+    # RUN HYBRID COMPUTATION (HARD-CODED 3 PROCESSES x 3 THREADS)
     # ----------------------------------------------------------------------------------
     n_processes = 3
     n_threads   = 3
     normalize   = False
 
-    print("\n================ HYBRID RUN (3 PROCESSES × 3 THREADS) ================\n")
+    print("\n================ HYBRID RUN (3 PROCESSES x 3 THREADS) ================\n")
 
     total_pairs = int(D * (D - 1) / 2)
     global_counter = multiprocessing.Value("i", 0)
@@ -300,7 +301,6 @@ def evaluate_dino_experiment(cfg: Dict):
         p.start()
         processes.append(p)
 
-    # ---- GLOBAL % OF DISTANCES ----
     last_percent = -1
 
     while any(p.is_alive() for p in processes):
@@ -325,9 +325,6 @@ def evaluate_dino_experiment(cfg: Dict):
     for p in processes:
         p.join()
 
-    # ----------------------------------------------------------------------------------
-    # MERGE PARTIAL DISTANCE BLOCKS INTO FULL MATRIX AND SAVE AS CSV
-    # ----------------------------------------------------------------------------------
     print("Merging distance blocks into full CSV matrix...")
 
     Dmat = np.zeros((D, D), dtype=np.float32)
@@ -353,10 +350,6 @@ def evaluate_dino_experiment(cfg: Dict):
 
     print(f"Full distance matrix saved to: {csv_path}")
 
-    # ----------------------------------------------------------------------------------
-    # CLEAN UP PARTIAL BLOCK FILES
-    # ----------------------------------------------------------------------------------
-
     for pid in range(n_processes):
         block_path = os.path.join(results_root, f"emd_block_proc{pid}.pkl")
 
@@ -365,10 +358,6 @@ def evaluate_dino_experiment(cfg: Dict):
         else:
             print(f"Warning: block file not found: {block_path}")
 
-
-    # ----------------------------------------------------------------------------------
-    # FINAL TIMING
-    # ----------------------------------------------------------------------------------
     t1 = time.perf_counter()
 
     total_time = t1 - t0
