@@ -3,13 +3,11 @@ import time
 import pickle
 import multiprocessing
 from typing import Dict, List
-from itertools import combinations
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from tqdm import tqdm
 from scipy.stats import wasserstein_distance
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -116,7 +114,7 @@ def mean_emd_numpy(emb_A: np.ndarray,
 
 
 #######################################################################################################
-# HYBRID WORKER (ONE PROCESS + MULTI-THREADING)
+# HYBRID WORKER (ONE PROCESS + MULTI-THREADING) — GLOBAL PROGRESS VERSION
 #######################################################################################################
 def hybrid_worker(proc_id,
                   n_processes,
@@ -124,7 +122,8 @@ def hybrid_worker(proc_id,
                   unique_classes,
                   results_root,
                   normalize,
-                  n_threads):
+                  n_threads,
+                  global_counter):
 
     def compute_row(cls1: int):
         emb_A = class_embeddings[cls1]
@@ -144,111 +143,34 @@ def hybrid_worker(proc_id,
         if i % n_processes == proc_id
     ]
 
-    print(f"[Process {proc_id}] Assigned {len(assigned_rows)} rows")
+    print(f"[Process {proc_id}] Started ({len(assigned_rows)} rows)")
 
     results = []
 
     with ThreadPoolExecutor(max_workers=n_threads) as executor:
 
-        futures = {
-            executor.submit(compute_row, cls): cls
+        futures = [
+            executor.submit(compute_row, cls)
             for cls in assigned_rows
-        }
+        ]
 
-        for future in tqdm(as_completed(futures),
-                           total=len(futures),
-                           desc=f"Process {proc_id}"):
-            results.extend(future.result())
+        for future in as_completed(futures):
+            res = future.result()
+            results.extend(res)
+
+            # Global distance count update
+            with global_counter.get_lock():
+                global_counter.value += len(res)
 
     out_file = os.path.join(results_root, f"emd_block_proc{proc_id}.pkl")
 
     with open(out_file, "wb") as f:
         pickle.dump(results, f)
 
-    print(f"[Process {proc_id}] Saved {len(results)} distances")
-
-
-#######################################################################################################
-# HYBRID BENCHMARK
-#######################################################################################################
-def benchmark_hybrid(class_embeddings,
-                     unique_classes,
-                     results_root,
-                     normalize=False,
-                     max_processes=4,
-                     max_threads=8):
-
-    benchmark_results = []
-
-    print("\n================ HYBRID BENCHMARK START ================\n")
-
-    for n_processes in range(1, max_processes + 1):
-        for n_threads in range(1, max_threads + 1):
-
-            print(f"\nBenchmarking: {n_processes} process(es) × {n_threads} thread(s)")
-
-            t0 = time.perf_counter()
-            processes = []
-
-            for pid in range(n_processes):
-                p = multiprocessing.Process(
-                    target=hybrid_worker,
-                    args=(
-                        pid,
-                        n_processes,
-                        class_embeddings,
-                        unique_classes,
-                        results_root,
-                        normalize,
-                        n_threads,
-                    )
-                )
-                p.start()
-                processes.append(p)
-
-            for p in processes:
-                p.join()
-
-            t1 = time.perf_counter()
-
-            total_time = t1 - t0
-            n_pairs = len(unique_classes) * (len(unique_classes) - 1) / 2.0
-            mean_time = total_time / n_pairs if n_pairs > 0 else float("nan")
-
-            benchmark_results.append({
-                "processes": n_processes,
-                "threads": n_threads,
-                "total_time": total_time,
-                "mean_time": mean_time,
-            })
-
-            print(
-                f"Processes: {n_processes:2d} | "
-                f"Threads: {n_threads:2d} | "
-                f"Total: {total_time:8.3f} s | "
-                f"Mean: {mean_time:.6f} s"
-            )
-
-    print("\n================ HYBRID BENCHMARK SUMMARY ================\n")
-
-    best = min(benchmark_results, key=lambda x: x["total_time"])
-
-    for r in benchmark_results:
-        print(
-            f"P={r['processes']:2d} | "
-            f"T={r['threads']:2d} | "
-            f"Total={r['total_time']:8.3f} s | "
-            f"Mean={r['mean_time']:.6f} s"
-        )
-
-    print("\n================ BEST CONFIGURATION ================\n")
     print(
-        f"Best: {best['processes']} process(es) × {best['threads']} thread(s)\n"
-        f"Total time: {best['total_time']:.3f} s\n"
-        f"Mean time: {best['mean_time']:.6f} s"
+        f"[Process {proc_id}] Finished | "
+        f"Saved {len(results)} distances"
     )
-
-    return benchmark_results, best
 
 
 #######################################################################################################
@@ -300,7 +222,23 @@ def evaluate_dino_experiment(cfg: Dict):
         all_embeddings = []
         q_cls = []
 
-        for i, folder in enumerate(tqdm(folder_list, desc="Embedding drugs")):
+        n_folders = len(folder_list)
+        print(f"\nEmbedding drugs: {n_folders} folders")
+
+        t0_embed = time.perf_counter()
+
+        for i, folder in enumerate(folder_list):
+
+            if len(drugs) > 50:
+                percent = int(100.0 * (i + 1) / n_folders)
+                prev_percent = int(100.0 * i / n_folders) if i > 0 else -1
+
+                if percent != prev_percent:
+                    elapsed = time.perf_counter() - t0_embed
+                    print(
+                        f"[Embedding] {i+1}/{n_folders} folders "
+                        f"({percent}%) | Elapsed: {elapsed:.1f} s"
+                    )
 
             Z = compute_embeddings_for_drug_folder(
                 student,
@@ -312,8 +250,6 @@ def evaluate_dino_experiment(cfg: Dict):
             all_embeddings.append(Z)
             q_cls.extend([i] * Z.shape[0])
 
-        embeddings = torch.cat(all_embeddings, dim=0)
-        q_cls = np.array(q_cls)
 
         with open(emb_cache_path, "wb") as f:
             pickle.dump({"embeddings": embeddings, "q_cls": q_cls}, f)
@@ -332,23 +268,114 @@ def evaluate_dino_experiment(cfg: Dict):
         class_embeddings[cls] = emb_np[mask]
 
     # ----------------------------------------------------------------------------------
-    # RUN HYBRID BENCHMARK
+    # RUN HYBRID COMPUTATION (HARD-CODED 3 PROCESSES × 3 THREADS)
     # ----------------------------------------------------------------------------------
-    hostname = os.uname().nodename
-    if "orion" in hostname:
-        max_processes = 4
-        max_threads = 6
-    else:
-        max_processes = 3
-        max_threads = 6
+    n_processes = 3
+    n_threads   = 3
+    normalize   = False
 
-    benchmark_results, best_cfg = benchmark_hybrid(
-        class_embeddings=class_embeddings,
-        unique_classes=unique_classes,
-        results_root=results_root,
-        normalize=False,
-        max_processes=max_processes,
-        max_threads=max_threads,
-    )
+    print("\n================ HYBRID RUN (3 PROCESSES × 3 THREADS) ================\n")
 
-    return benchmark_results, best_cfg, valid_drugs
+    total_pairs = int(D * (D - 1) / 2)
+    global_counter = multiprocessing.Value("i", 0)
+
+    t0 = time.perf_counter()
+    processes = []
+
+    for pid in range(n_processes):
+        p = multiprocessing.Process(
+            target=hybrid_worker,
+            args=(
+                pid,
+                n_processes,
+                class_embeddings,
+                unique_classes,
+                results_root,
+                normalize,
+                n_threads,
+                global_counter,
+            )
+        )
+        p.start()
+        processes.append(p)
+
+    # ---- GLOBAL % OF DISTANCES ----
+    last_percent = -1
+
+    while any(p.is_alive() for p in processes):
+
+        with global_counter.get_lock():
+            done = global_counter.value
+
+        if total_pairs > 0:
+            percent = int(100.0 * done / total_pairs)
+        else:
+            percent = 100
+
+        if percent != last_percent:
+            print(
+                f"[Hybrid] Distances computed: {done}/{total_pairs} "
+                f"({percent}%)"
+            )
+            last_percent = percent
+
+        time.sleep(5)
+
+    for p in processes:
+        p.join()
+
+    # ----------------------------------------------------------------------------------
+    # MERGE PARTIAL DISTANCE BLOCKS INTO FULL MATRIX AND SAVE AS CSV
+    # ----------------------------------------------------------------------------------
+    print("Merging distance blocks into full CSV matrix...")
+
+    Dmat = np.zeros((D, D), dtype=np.float32)
+
+    for pid in range(n_processes):
+        block_path = os.path.join(results_root, f"emd_block_proc{pid}.pkl")
+
+        if not os.path.isfile(block_path):
+            raise RuntimeError(f"Missing block file: {block_path}")
+
+        with open(block_path, "rb") as f:
+            block = pickle.load(f)
+
+        for (i, j), dist in block:
+            Dmat[i, j] = dist
+            Dmat[j, i] = dist
+
+    np.fill_diagonal(Dmat, 0.0)
+
+    csv_path = os.path.join(results_root, "emd_full_matrix.csv")
+    df_mat = pd.DataFrame(Dmat, index=valid_drugs, columns=valid_drugs)
+    df_mat.to_csv(csv_path)
+
+    print(f"Full distance matrix saved to: {csv_path}")
+
+    # ----------------------------------------------------------------------------------
+    # CLEAN UP PARTIAL BLOCK FILES
+    # ----------------------------------------------------------------------------------
+
+    for pid in range(n_processes):
+        block_path = os.path.join(results_root, f"emd_block_proc{pid}.pkl")
+
+        if os.path.isfile(block_path):
+            os.remove(block_path)
+        else:
+            print(f"Warning: block file not found: {block_path}")
+
+
+    # ----------------------------------------------------------------------------------
+    # FINAL TIMING
+    # ----------------------------------------------------------------------------------
+    t1 = time.perf_counter()
+
+    total_time = t1 - t0
+    mean_time  = total_time / total_pairs if total_pairs > 0 else float("nan")
+
+    print("\n================ HYBRID RUN FINISHED ================\n")
+    print(f"Processes: 3 | Threads: 3")
+    print(f"Total time: {total_time:.3f} s")
+    print(f"Mean time per pair: {mean_time:.6f} s")
+
+    return total_time, mean_time, valid_drugs
