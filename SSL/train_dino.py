@@ -240,9 +240,9 @@ def run_dino_experiment(cfg: Dict):
     base_momentum = float(cfg.get("base_momentum", 0.996))
     max_momentum  = float(cfg.get("max_momentum", 1.0))
 
-    results_root    = str(cfg.get("results_root", "./Results/DINO_default"))
-    checkpoints_dir = ensure_dir(f"{results_root}/checkpoints")
     experiment_name = str(cfg.get("experiment_name", "DINO_experiment"))
+    results_root    = ensure_dir(f"./Results/{experiment_name}")
+    checkpoints_dir = ensure_dir(f"{results_root}/checkpoints")
 
     gpu_transform = KorniaMultiCropTransform(
         image_size=image_size,

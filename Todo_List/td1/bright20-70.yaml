@@ -1,4 +1,4 @@
-experiment_name: "contrast"
+experiment_name: "bright20-70"
 
 # Dataset
 image_size: 96
@@ -28,13 +28,13 @@ augment:
 
   solarization_p: 0.0
 
-  brightness_dapi_p: 0.0
+  brightness_dapi_p: 0.2
   brightness_dapi_range: [0.5, 3.0]
 
-  brightness_egfp_p: 0.0
+  brightness_egfp_p: 0.7
   brightness_egfp_range: [0.5, 2.0]
 
-  contrast_p: 0.7
+  contrast_p: 0.0
   contrast_range: [0.9, 1.1]
 
   rotation_degrees: [-180, 180]        
@@ -43,6 +43,4 @@ augment:
 base_momentum: 0.996
 max_momentum: 1.0
 
-# Output
-results_root: "./Results/test"
 

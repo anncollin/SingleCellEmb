@@ -42,7 +42,3 @@ augment:
 # EMA
 base_momentum: 0.996
 max_momentum: 1.0
-
-# Output
-results_root: "./Results/test"
-
