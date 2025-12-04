@@ -141,6 +141,7 @@ def main():
             print("Starting EVAL phase on FULL SUBSET...")
 
         evaluate_dino_experiment(cfg, use_callibration)
+        evaluate_dino_experiment(cfg, False)
 
 
 if __name__ == "__main__":

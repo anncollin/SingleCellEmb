@@ -14,7 +14,7 @@ from Dataset.data_loader import CellDataset
 from SSL.transforms import KorniaMultiCropTransform
 from SSL.model import create_vit_small_backbone, DINOHead, DINOStudent
 from SSL.loss import DINOLoss
-from SSL.utils import update_teacher, ensure_dir, save_checkpoint
+from SSL.utils import update_teacher, ensure_dir, save_checkpoint, visualize_multicrop
 
 
 #######################################################################################################
@@ -261,6 +261,10 @@ def run_dino_experiment(cfg: Dict):
         pin_memory=True,
         drop_last=True,
     )
+    # ----------- start : visualization of DA -----------
+    visualize_multicrop(
+        dataset=dataset, gpu_transform=gpu_transform, device=device, channel_display="rgb")   
+    # ----------- end : visualization of DA -----------
 
     backbone_student = create_vit_small_backbone(
         patch_size=patch_size,

@@ -30,9 +30,8 @@ class RandomChannelBrightness(nn.Module):
         return x
 
 
-
 #######################################################################################################
-# GPU MULTI-CROP TRANSFORM (KORNIA VERSION - CLEAN DINO STYLE)
+# GPU MULTI-CROP TRANSFORM (KORNIA VERSION - FULL YAML-DRIVEN)
 #######################################################################################################
 class KorniaMultiCropTransform(nn.Module):
 
@@ -59,6 +58,7 @@ class KorniaMultiCropTransform(nn.Module):
         elastic_sigma_range = tuple(aug.get("elastic_sigma_range", [4.0, 6.0]))
 
         solarization_p = float(aug.get("solarization_p", 0.0))
+
         contrast_p     = float(aug.get("contrast_p", 0.0))
         contrast_range = tuple(aug.get("contrast_range", [0.8, 1.2]))
 
@@ -68,10 +68,23 @@ class KorniaMultiCropTransform(nn.Module):
         brightness_egfp_p     = float(aug.get("brightness_egfp_p", 0.0))
         brightness_egfp_range = tuple(aug.get("brightness_egfp_range", [1.0, 1.0]))
 
-
         rotation_degrees = aug.get("rotation_degrees", None)
         if rotation_degrees is not None:
             rotation_degrees = tuple(rotation_degrees)
+
+        # ---- BLUR (GLOBAL / LOCAL)
+        blur_global_p     = float(aug.get("blur_global_p", 0.0))
+        blur_global_sigma = tuple(aug.get("blur_global_sigma", [0.5, 2.0]))
+
+        blur_local_p     = float(aug.get("blur_local_p", 0.0))
+        blur_local_sigma = tuple(aug.get("blur_local_sigma", [0.1, 0.5]))
+
+        # ---- GAUSSIAN NOISE (GLOBAL / LOCAL)
+        noise_global_p   = float(aug.get("noise_global_p", 0.0))
+        noise_global_std = tuple(aug.get("noise_global_std", [0.0, 0.0]))
+
+        noise_local_p   = float(aug.get("noise_local_p", 0.0))
+        noise_local_std = tuple(aug.get("noise_local_std", [0.0, 0.0]))
 
         # -----------------------
         # 2. STRONG (GLOBAL-ONLY) EXTRA AUGS
@@ -117,7 +130,7 @@ class KorniaMultiCropTransform(nn.Module):
             strong_extra.append(K.RandomSolarize(p=solarization_p))
 
         # -----------------------
-        # 3. GEOMETRIC ROTATION (SHARED)
+        # 3. SHARED GEOMETRY
         # -----------------------
         if rotation_degrees is None:
             rotation = nn.Identity()
@@ -129,7 +142,51 @@ class KorniaMultiCropTransform(nn.Module):
             )
 
         # -----------------------
-        # 4. GLOBAL PIPELINE (STRONG)
+        # 4. GLOBAL BLUR + NOISE
+        # -----------------------
+        if blur_global_p > 0:
+            global_blur = K.RandomGaussianBlur(
+                kernel_size=(3, 3),
+                sigma=blur_global_sigma,
+                p=blur_global_p,
+            )
+        else:
+            global_blur = nn.Identity()
+
+        if noise_global_p > 0:
+            global_noise = K.RandomGaussianNoise(
+                mean=0.0,
+                std=float(noise_global_std[1]),   # FIX: use a single float
+                p=noise_global_p,
+            )
+        else:
+            global_noise = nn.Identity()
+
+
+        # -----------------------
+        # 5. LOCAL BLUR + NOISE
+        # -----------------------
+        if blur_local_p > 0:
+            local_blur = K.RandomGaussianBlur(
+                kernel_size=(3, 3),
+                sigma=blur_local_sigma,
+                p=blur_local_p,
+            )
+        else:
+            local_blur = nn.Identity()
+
+        if noise_local_p > 0:
+            local_noise = K.RandomGaussianNoise(
+                mean=0.0,
+                std=float(noise_local_std[1]),   # FIX: use a single float
+                p=noise_local_p,
+            )
+        else:
+            local_noise = nn.Identity()
+
+
+        # -----------------------
+        # 6. GLOBAL PIPELINE
         # -----------------------
         self.global_transform = nn.Sequential(
             K.RandomResizedCrop(
@@ -142,18 +199,14 @@ class KorniaMultiCropTransform(nn.Module):
             K.RandomVerticalFlip(p=0.5),
             rotation,
 
-            # STRONG BLUR
-            K.RandomGaussianBlur(
-                kernel_size=(3, 3),
-                sigma=(0.5, 2.0),
-                p=1.0,
-            ),
+            global_blur,
+            global_noise,
 
             *strong_extra,
         )
 
         # -----------------------
-        # 5. LOCAL PIPELINE (WEAK)
+        # 7. LOCAL PIPELINE
         # -----------------------
         self.local_transform = nn.Sequential(
             K.RandomResizedCrop(
@@ -166,16 +219,12 @@ class KorniaMultiCropTransform(nn.Module):
             K.RandomVerticalFlip(p=0.5),
             rotation,
 
-            # WEAK BLUR
-            K.RandomGaussianBlur(
-                kernel_size=(3, 3),
-                sigma=(0.1, 0.5),
-                p=1.0,
-            ),
+            local_blur,
+            local_noise,
         )
 
     # -----------------------
-    # 6. FORWARD (BATCHED GPU)
+    # 8. FORWARD (BATCHED GPU)
     # -----------------------
     def forward(self, x: torch.Tensor):
         """
@@ -185,11 +234,9 @@ class KorniaMultiCropTransform(nn.Module):
         """
         views = []
 
-        # Two global crops
         views.append(self.global_transform(x))
         views.append(self.global_transform(x))
 
-        # Local crops
         for _ in range(self.local_crops_number):
             views.append(self.local_transform(x))
 
