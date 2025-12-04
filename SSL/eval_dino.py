@@ -202,63 +202,72 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
 
     student = load_trained_student(ckpt, cfg, device=device)
 
-    # ------------------------------------------------------------------------------
-    # SELECT SUBSET
-    # ------------------------------------------------------------------------------
-    if use_callibration:
-        drugs = load_drug_list(cfg["callibration_path"])
-        emd_suffix = "_callibration"
-        print("Using CALLIBRATION subset")
-    else:
-        drugs = load_drug_list(cfg["label_path"])
-        emd_suffix = ""
-        print("Using FULL label subset")
+    # ======================================================================
+    # 1) ALWAYS LOAD FULL DATASET FOR EMBEDDINGS
+    # ======================================================================
+    all_drugs = load_drug_list(cfg["label_path"])
+    print(f"Embedding on FULL dataset: {len(all_drugs)} drugs")
 
-    valid_drugs = []
+    all_valid_drugs = []
     folder_list = []
 
-    for drug in drugs:
-        folder = get_npy_folder_from_drug(drug, cfg)
+    for drug in all_drugs:
+        folder = get_npy_folder_from_drug(drug, cfg)  # still uses label_path internally
         if folder is not None:
-            valid_drugs.append(drug)
+            all_valid_drugs.append(drug)
             folder_list.append(folder)
 
+    print(f"Valid embedding folders found: {len(folder_list)}")
+
+    # ======================================================================
+    # 2) SELECT SUBSET FOR EMD
+    # ======================================================================
+    if use_callibration:
+        subset_drugs = load_drug_list(cfg["callibration_path"])
+        emd_suffix = "_callibration"
+        print("Computing EMD on CALLIBRATION subset")
+    else:
+        subset_drugs = load_drug_list(cfg["label_path"])
+        emd_suffix = ""
+        print("Computing EMD on FULL label subset")
+
+    # Keep only subset drugs that actually have embeddings
+    valid_drugs = [d for d in subset_drugs if d in all_valid_drugs]
     D = len(valid_drugs)
 
-    # ------------------------------------------------------------------------------
-    # EMBEDDING CACHE
-    # ------------------------------------------------------------------------------
+    print(f"Valid EMD drugs: {D}")
+
+    # ======================================================================
+    # 3) EMBEDDING CACHE (ALWAYS FULL DATASET)
+    # ======================================================================
     if os.path.isfile(emb_cache_path):
 
         print("Loading cached embeddings...")
         cache = torch.load(emb_cache_path, map_location="cpu")
         embeddings = cache["embeddings"]
-        q_cls = cache["q_cls"]
+        q_cls      = cache["q_cls"]
 
     else:
 
-        print("Computing embeddings (first run)...")
+        print("Computing embeddings (first run on FULL dataset)...")
 
         all_embeddings = []
         q_cls = []
 
         n_folders = len(folder_list)
-        print(f"\nEmbedding drugs: {n_folders} folders")
-
         t0_embed = time.perf_counter()
 
-        for i, folder in enumerate(folder_list):
+        for global_idx, folder in enumerate(folder_list):
 
-            if len(drugs) > 50:
-                percent = int(100.0 * (i + 1) / n_folders)
-                prev_percent = int(100.0 * i / n_folders) if i > 0 else -1
+            percent = int(100.0 * (global_idx + 1) / n_folders)
+            prev_percent = int(100.0 * global_idx / n_folders) if global_idx > 0 else -1
 
-                if percent != prev_percent:
-                    elapsed = time.perf_counter() - t0_embed
-                    print(
-                        f"[Embedding] {i+1}/{n_folders} folders "
-                        f"({percent}%) | Elapsed: {elapsed:.1f} s"
-                    )
+            if percent != prev_percent:
+                elapsed = time.perf_counter() - t0_embed
+                print(
+                    f"[Embedding] {global_idx+1}/{n_folders} folders "
+                    f"({percent}%) | Elapsed: {elapsed:.1f} s"
+                )
 
             Z = compute_embeddings_for_drug_folder(
                 student,
@@ -268,7 +277,7 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
             )
 
             all_embeddings.append(Z)
-            q_cls.extend([i] * Z.shape[0])
+            q_cls.extend([global_idx] * Z.shape[0])
 
         embeddings = torch.cat(all_embeddings, dim=0).cpu()
         q_cls = np.asarray(q_cls, dtype=np.int32)
@@ -276,20 +285,23 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         torch.save({"embeddings": embeddings, "q_cls": q_cls}, emb_cache_path)
         print("Cached embeddings saved.")
 
-    # ------------------------------------------------------------------------------
-    # BUILD PER-CLASS EMBEDDINGS
-    # ------------------------------------------------------------------------------
+    # ======================================================================
+    # 4) BUILD CLASS EMBEDDINGS ONLY FOR THE EMD SUBSET
+    # ======================================================================
     emb_np = embeddings.numpy()
-    unique_classes = list(range(D))
+
+    subset_indices = [all_valid_drugs.index(d) for d in valid_drugs]
+
+    unique_classes = list(range(len(subset_indices)))
     class_embeddings = {}
 
-    for cls in unique_classes:
-        mask = (q_cls == cls)
-        class_embeddings[cls] = emb_np[mask]
+    for local_cls, global_cls in enumerate(subset_indices):
+        mask = (q_cls == global_cls)
+        class_embeddings[local_cls] = emb_np[mask]
 
-    # ------------------------------------------------------------------------------
-    # RUN HYBRID COMPUTATION
-    # ------------------------------------------------------------------------------
+    # ======================================================================
+    # 5) RUN HYBRID EMD COMPUTATION
+    # ======================================================================
     n_processes = 3
     n_threads   = 3
     normalize   = False
@@ -343,9 +355,9 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     for p in processes:
         p.join()
 
-    # ------------------------------------------------------------------------------
-    # MERGE BLOCKS
-    # ------------------------------------------------------------------------------
+    # ======================================================================
+    # 6) MERGE BLOCKS
+    # ======================================================================
     print("Merging distance blocks into full CSV matrix...")
 
     Dmat = np.zeros((D, D), dtype=np.float32)
@@ -375,13 +387,19 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
 
     print(f"Full distance matrix saved to: {csv_path}")
 
-    # ------------------------------------------------------------------------------
-    # CLEANUP
-    # ------------------------------------------------------------------------------
+    # ======================================================================
+    # 7) CLEANUP
+    # ======================================================================
     for pid in range(n_processes):
+
         block_path = os.path.join(results_root, f"emd_block_proc{pid}.npy")
+        tmp_path   = block_path + ".tmp"
+
         if os.path.isfile(block_path):
             os.remove(block_path)
+
+        if os.path.isfile(tmp_path):
+            os.remove(tmp_path)
 
     t1 = time.perf_counter()
 
@@ -394,3 +412,4 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     print(f"Mean time per pair: {mean_time:.6f} s")
 
     return total_time, mean_time, valid_drugs
+
