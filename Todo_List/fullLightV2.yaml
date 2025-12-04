@@ -26,15 +26,15 @@ augment:
   elastic_alpha_range: [4.0, 8.0] 
   elastic_sigma_range: [30.0, 40.0] 
 
-  solarization_p: 0.05
+  solarization_p: 0.3
 
-  brightness_dapi_p: 0.05
+  brightness_dapi_p: 0.2
   brightness_dapi_range: [0.5, 3.0]
 
-  brightness_egfp_p: 0.05
+  brightness_egfp_p: 0.2
   brightness_egfp_range: [0.5, 2.0]
 
-  contrast_p: 0.2
+  contrast_p: 0.3
   contrast_range: [0.9, 1.1]
 
   rotation_degrees: [-180, 180]      
