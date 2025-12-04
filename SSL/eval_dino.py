@@ -1,6 +1,5 @@
 import os
 import time
-import pickle
 import multiprocessing
 from typing import Dict, List
 
@@ -125,18 +124,25 @@ def hybrid_worker(proc_id,
                   n_threads,
                   global_counter):
 
-    def compute_row(cls1: int):
+    # make sure workers do not touch CUDA
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+    def compute_row(cls1: int) -> np.ndarray:
         emb_A = class_embeddings[cls1]
-        row_results = []
+        row_list = []
 
         for cls2 in unique_classes:
             if cls2 <= cls1:
                 continue
+
             emb_B = class_embeddings[cls2]
             dist = mean_emd_numpy(emb_A, emb_B, normalize=normalize)
-            row_results.append(((cls1, cls2), dist))
+            row_list.append((cls1, cls2, dist))
 
-        return row_results
+        if len(row_list) == 0:
+            return np.zeros((0, 3), dtype=np.float32)
+
+        return np.asarray(row_list, dtype=np.float32)
 
     assigned_rows = [
         cls for i, cls in enumerate(unique_classes)
@@ -145,7 +151,7 @@ def hybrid_worker(proc_id,
 
     print(f"[Process {proc_id}] Started ({len(assigned_rows)} rows)")
 
-    results = []
+    results_chunks = []
 
     with ThreadPoolExecutor(max_workers=n_threads) as executor:
 
@@ -156,19 +162,25 @@ def hybrid_worker(proc_id,
 
         for future in as_completed(futures):
             res = future.result()
-            results.extend(res)
+            if res.size > 0:
+                results_chunks.append(res)
+                with global_counter.get_lock():
+                    global_counter.value += res.shape[0]
 
-            with global_counter.get_lock():
-                global_counter.value += len(res)
+    if len(results_chunks) > 0:
+        results = np.concatenate(results_chunks, axis=0)
+    else:
+        results = np.zeros((0, 3), dtype=np.float32)
 
-    out_file = os.path.join(results_root, f"emd_block_proc{proc_id}.pkl")
+    out_file = os.path.join(results_root, f"emd_block_proc{proc_id}.npy")
+    tmp_file = out_file + ".tmp"
 
-    with open(out_file, "wb") as f:
-        pickle.dump(results, f)
+    np.save(tmp_file, results)
+    os.replace(tmp_file, out_file)
 
     print(
         f"[Process {proc_id}] Finished | "
-        f"Saved {len(results)} distances"
+        f"Saved {results.shape[0]} distances"
     )
 
 
@@ -180,17 +192,17 @@ def evaluate_dino_experiment(cfg: Dict):
     multiprocessing.set_start_method("spawn", force=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    
+
     experiment_name = str(cfg.get("experiment_name", "DINO_experiment"))
     results_root    = ensure_dir(f"./Results/{experiment_name}")
     ensure_dir(results_root)
 
     ckpt = os.path.join(results_root, "checkpoints", "final_weights.pth")
-    emb_cache_path = os.path.join(results_root, "cached_embeddings.pkl")
+    emb_cache_path = os.path.join(results_root, "cached_embeddings.pt")
 
     student = load_trained_student(ckpt, cfg, device=device)
 
-    drugs = load_drug_list(cfg["label_path"])
+    drugs = load_drug_list(cfg["callibration_path"])
 
     valid_drugs = []
     folder_list = []
@@ -209,9 +221,7 @@ def evaluate_dino_experiment(cfg: Dict):
     if os.path.isfile(emb_cache_path):
 
         print("Loading cached embeddings...")
-        with open(emb_cache_path, "rb") as f:
-            cache = pickle.load(f)
-
+        cache = torch.load(emb_cache_path, map_location="cpu")
         embeddings = cache["embeddings"]
         q_cls = cache["q_cls"]
 
@@ -250,12 +260,10 @@ def evaluate_dino_experiment(cfg: Dict):
             all_embeddings.append(Z)
             q_cls.extend([i] * Z.shape[0])
 
-        embeddings = torch.cat(all_embeddings, dim=0)
+        embeddings = torch.cat(all_embeddings, dim=0).cpu()
         q_cls = np.asarray(q_cls, dtype=np.int32)
 
-        with open(emb_cache_path, "wb") as f:
-            pickle.dump({"embeddings": embeddings, "q_cls": q_cls}, f)
-
+        torch.save({"embeddings": embeddings, "q_cls": q_cls}, emb_cache_path)
         print("Cached embeddings saved.")
 
     # ----------------------------------------------------------------------------------
@@ -270,7 +278,7 @@ def evaluate_dino_experiment(cfg: Dict):
         class_embeddings[cls] = emb_np[mask]
 
     # ----------------------------------------------------------------------------------
-    # RUN HYBRID COMPUTATION (HARD-CODED 3 PROCESSES x 3 THREADS)
+    # RUN HYBRID COMPUTATION
     # ----------------------------------------------------------------------------------
     n_processes = 3
     n_threads   = 3
@@ -280,6 +288,9 @@ def evaluate_dino_experiment(cfg: Dict):
 
     total_pairs = int(D * (D - 1) / 2)
     global_counter = multiprocessing.Value("i", 0)
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     t0 = time.perf_counter()
     processes = []
@@ -330,15 +341,16 @@ def evaluate_dino_experiment(cfg: Dict):
     Dmat = np.zeros((D, D), dtype=np.float32)
 
     for pid in range(n_processes):
-        block_path = os.path.join(results_root, f"emd_block_proc{pid}.pkl")
+        block_path = os.path.join(results_root, f"emd_block_proc{pid}.npy")
 
         if not os.path.isfile(block_path):
             raise RuntimeError(f"Missing block file: {block_path}")
 
-        with open(block_path, "rb") as f:
-            block = pickle.load(f)
+        block = np.load(block_path)
 
-        for (i, j), dist in block:
+        for i, j, dist in block:
+            i = int(i)
+            j = int(j)
             Dmat[i, j] = dist
             Dmat[j, i] = dist
 
@@ -351,7 +363,7 @@ def evaluate_dino_experiment(cfg: Dict):
     print(f"Full distance matrix saved to: {csv_path}")
 
     for pid in range(n_processes):
-        block_path = os.path.join(results_root, f"emd_block_proc{pid}.pkl")
+        block_path = os.path.join(results_root, f"emd_block_proc{pid}.npy")
 
         if os.path.isfile(block_path):
             os.remove(block_path)
@@ -364,7 +376,7 @@ def evaluate_dino_experiment(cfg: Dict):
     mean_time  = total_time / total_pairs if total_pairs > 0 else float("nan")
 
     print("\n================ HYBRID RUN FINISHED ================\n")
-    print(f"Processes: 3 | Threads: 3")
+    print(f"Processes: {n_processes} | Threads: {n_threads}")
     print(f"Total time: {total_time:.3f} s")
     print(f"Mean time per pair: {mean_time:.6f} s")
 
