@@ -187,7 +187,7 @@ def hybrid_worker(proc_id,
 #######################################################################################################
 # MAIN EVALUATION ENTRY POINT
 #######################################################################################################
-def evaluate_dino_experiment(cfg: Dict):
+def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
 
     multiprocessing.set_start_method("spawn", force=True)
 
@@ -202,7 +202,17 @@ def evaluate_dino_experiment(cfg: Dict):
 
     student = load_trained_student(ckpt, cfg, device=device)
 
-    drugs = load_drug_list(cfg["callibration_path"])
+    # ------------------------------------------------------------------------------
+    # SELECT SUBSET
+    # ------------------------------------------------------------------------------
+    if use_callibration:
+        drugs = load_drug_list(cfg["callibration_path"])
+        emd_suffix = "_callibration"
+        print("Using CALLIBRATION subset")
+    else:
+        drugs = load_drug_list(cfg["label_path"])
+        emd_suffix = ""
+        print("Using FULL label subset")
 
     valid_drugs = []
     folder_list = []
@@ -215,9 +225,9 @@ def evaluate_dino_experiment(cfg: Dict):
 
     D = len(valid_drugs)
 
-    # ----------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
     # EMBEDDING CACHE
-    # ----------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
     if os.path.isfile(emb_cache_path):
 
         print("Loading cached embeddings...")
@@ -266,9 +276,9 @@ def evaluate_dino_experiment(cfg: Dict):
         torch.save({"embeddings": embeddings, "q_cls": q_cls}, emb_cache_path)
         print("Cached embeddings saved.")
 
-    # ----------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
     # BUILD PER-CLASS EMBEDDINGS
-    # ----------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
     emb_np = embeddings.numpy()
     unique_classes = list(range(D))
     class_embeddings = {}
@@ -277,9 +287,9 @@ def evaluate_dino_experiment(cfg: Dict):
         mask = (q_cls == cls)
         class_embeddings[cls] = emb_np[mask]
 
-    # ----------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
     # RUN HYBRID COMPUTATION
-    # ----------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
     n_processes = 3
     n_threads   = 3
     normalize   = False
@@ -319,10 +329,7 @@ def evaluate_dino_experiment(cfg: Dict):
         with global_counter.get_lock():
             done = global_counter.value
 
-        if total_pairs > 0:
-            percent = int(100.0 * done / total_pairs)
-        else:
-            percent = 100
+        percent = int(100.0 * done / total_pairs) if total_pairs > 0 else 100
 
         if percent != last_percent:
             print(
@@ -336,11 +343,15 @@ def evaluate_dino_experiment(cfg: Dict):
     for p in processes:
         p.join()
 
+    # ------------------------------------------------------------------------------
+    # MERGE BLOCKS
+    # ------------------------------------------------------------------------------
     print("Merging distance blocks into full CSV matrix...")
 
     Dmat = np.zeros((D, D), dtype=np.float32)
 
     for pid in range(n_processes):
+
         block_path = os.path.join(results_root, f"emd_block_proc{pid}.npy")
 
         if not os.path.isfile(block_path):
@@ -356,19 +367,21 @@ def evaluate_dino_experiment(cfg: Dict):
 
     np.fill_diagonal(Dmat, 0.0)
 
-    csv_path = os.path.join(results_root, "emd_full_matrix.csv")
+    csv_name = f"DINO_{experiment_name}_EMD{emd_suffix}.csv"
+    csv_path = os.path.join(results_root, csv_name)
+
     df_mat = pd.DataFrame(Dmat, index=valid_drugs, columns=valid_drugs)
     df_mat.to_csv(csv_path)
 
     print(f"Full distance matrix saved to: {csv_path}")
 
+    # ------------------------------------------------------------------------------
+    # CLEANUP
+    # ------------------------------------------------------------------------------
     for pid in range(n_processes):
         block_path = os.path.join(results_root, f"emd_block_proc{pid}.npy")
-
         if os.path.isfile(block_path):
             os.remove(block_path)
-        else:
-            print(f"Warning: block file not found: {block_path}")
 
     t1 = time.perf_counter()
 
