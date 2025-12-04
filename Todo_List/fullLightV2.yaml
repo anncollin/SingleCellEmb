@@ -10,10 +10,10 @@ out_dim: 768
 
 # Training
 batch_size: 64
-epochs: 5
+epochs: 200
 learning_rate: 1e-4
 weight_decay: 0.05
-num_workers: 4
+num_workers: 0
 
 # DINO Multi-crop
 global_crops_scale: [0.5, 0.9]
