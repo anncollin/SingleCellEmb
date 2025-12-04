@@ -20,7 +20,7 @@ class CellDataset(Dataset):
     def __init__(self, root_dir, transform=None, synthetic_length=100_000):
         super().__init__()
         self.root_dir = root_dir
-        self.transform = transform   # kept for compatibility, but NOT USED
+        self.transform = transform
         self.synthetic_length = synthetic_length
 
         # find all .npy files
@@ -39,9 +39,20 @@ class CellDataset(Dataset):
         return self.synthetic_length
 
     def __getitem__(self, idx):
-        path = random.choice(self.npy_files)
-        arr = np.load(path)
-        tensor = torch.from_numpy(arr).float()  
 
-        return tensor
+        while True:  # keep trying until a valid file is found
+            path = random.choice(self.npy_files)
+
+            try:
+                arr = np.load(path)
+                tensor = torch.from_numpy(arr).float()
+                return tensor
+
+            except Exception:
+                # silently drop broken file
+                if path in self.npy_files:
+                    self.npy_files.remove(path)
+
+                if len(self.npy_files) == 0:
+                    raise RuntimeError("[CellDataset] All .npy files are broken.")
 
