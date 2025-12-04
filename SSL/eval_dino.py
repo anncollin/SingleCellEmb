@@ -173,10 +173,11 @@ def hybrid_worker(proc_id,
         results = np.zeros((0, 3), dtype=np.float32)
 
     out_file = os.path.join(results_root, f"emd_block_proc{proc_id}.npy")
-    tmp_file = out_file + ".tmp"
+    tmp_file = out_file + ".tmp.npy"
 
     np.save(tmp_file, results)
     os.replace(tmp_file, out_file)
+
 
     print(
         f"[Process {proc_id}] Finished | "
