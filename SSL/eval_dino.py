@@ -76,20 +76,35 @@ def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_siz
     for i in range(0, len(files), batch_size):
 
         batch_files = files[i:i + batch_size]
+        batch_list = []
 
-        batch = np.stack(
-            [np.load(os.path.join(folder, f)).astype(np.float32)
-             for f in batch_files],
-            axis=0
-        )
+        for f in batch_files:
+            path = os.path.join(folder, f)
+            try:
+                arr = np.load(path).astype(np.float32)
+                batch_list.append(arr)
+            except Exception:
+                # SILENTLY skip broken file
+                continue
 
+        # If the whole batch was broken, just skip it
+        if len(batch_list) == 0:
+            continue
+
+        batch = np.stack(batch_list, axis=0)
         batch = torch.from_numpy(batch).to(device, non_blocking=True)
+
         z = student.backbone(batch)
         out.append(z.cpu())
 
         del batch
 
+    # If EVERYTHING was broken in this folder
+    if len(out) == 0:
+        return torch.empty(0, student.backbone.num_features)
+
     return torch.cat(out, dim=0)
+
 
 
 #######################################################################################################
