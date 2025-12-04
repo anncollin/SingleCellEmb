@@ -262,8 +262,7 @@ def run_dino_experiment(cfg: Dict):
         drop_last=True,
     )
     # ----------- start : visualization of DA -----------
-    visualize_multicrop(
-        dataset=dataset, gpu_transform=gpu_transform, device=device, channel_display="rgb")   
+    #visualize_multicrop(dataset=dataset, gpu_transform=gpu_transform, device=device, channel_display="rgb")   
     # ----------- end : visualization of DA -----------
 
     backbone_student = create_vit_small_backbone(
