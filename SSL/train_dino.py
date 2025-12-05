@@ -110,10 +110,10 @@ def train_one_epoch(
     teacher.eval()
 
     total_loss = 0.0
-    n_batches = 0
+    n_batches  = 0
 
     total_batches = len(dataloader)
-    max_batches = max(1, int(0.1 * total_batches))  # hardcoded 10%
+    max_batches   = max(1, int(0.1 * total_batches))  # hardcoded 10%
 
     data_iter = tqdm(dataloader, desc=f"Epoch {epoch+1}", ncols=100, disable=use_wandb)
 
