@@ -10,7 +10,7 @@ out_dim: 128
 architecture: tiny  
 
 # Training
-batch_size: 128
+batch_size: 64
 epochs: 250
 learning_rate: 1e-4
 weight_decay: 0.05
