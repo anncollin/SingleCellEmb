@@ -1,4 +1,4 @@
-experiment_name: "tiny8-128_lightDA"
+experiment_name: "tiny8-128_ultraLightDA"
 
 # Dataset
 image_size: 96
