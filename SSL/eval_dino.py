@@ -15,17 +15,37 @@ from SSL.utils import ensure_dir
 
 
 #######################################################################################################
+# TIME FORMATTER (HOURS / MINUTES / SECONDS)
+#######################################################################################################
+def hms(seconds: float) -> str:
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds % 60
+    return f"{h}h {m}m {s:.1f}s"
+
+
+#######################################################################################################
 # LOAD TRAINED STUDENT
 #######################################################################################################
 def load_trained_student(checkpoint_path: str, cfg: Dict, device: str = "cuda"):
 
-    patch_size = int(cfg.get("patch_size", 8))
-    in_chans   = int(cfg.get("in_channels", 2))
-    out_dim    = int(cfg.get("out_dim", 8192))
+    patch_size   = int(cfg.get("patch_size", 8))
+    in_chans     = int(cfg.get("in_channels", 2))
+    out_dim      = int(cfg.get("out_dim", 8192))
+    architecture = str(cfg.get("architecture", "tiny"))
 
-    backbone = create_vit_small_backbone(patch_size=patch_size, in_chans=in_chans)
-    head     = DINOHead(in_dim=backbone.num_features, out_dim=out_dim)
-    student  = DINOStudent(backbone, head).to(device)
+    backbone = create_vit_small_backbone(
+        architecture=architecture,
+        patch_size=patch_size,
+        in_chans=in_chans,
+    )
+
+    head = DINOHead(
+        in_dim=backbone.num_features,
+        out_dim=out_dim
+    )
+
+    student = DINOStudent(backbone, head).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device)
     student.load_state_dict(ckpt["student_state_dict"], strict=True)
@@ -84,7 +104,7 @@ def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_siz
                 arr = np.load(path).astype(np.float32)
                 batch_list.append(arr)
             except Exception:
-                # SILENTLY skip broken file
+                # silently skip broken file
                 continue
 
         # If the whole batch was broken, just skip it
@@ -104,7 +124,6 @@ def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_siz
         return torch.empty(0, student.backbone.num_features)
 
     return torch.cat(out, dim=0)
-
 
 
 #######################################################################################################
@@ -193,7 +212,6 @@ def hybrid_worker(proc_id,
     np.save(tmp_file, results)
     os.replace(tmp_file, out_file)
 
-
     print(
         f"[Process {proc_id}] Finished | "
         f"Saved {results.shape[0]} distances"
@@ -279,11 +297,22 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
             prev_percent = int(100.0 * global_idx / n_folders) if global_idx > 0 else -1
 
             if percent != prev_percent:
+
                 elapsed = time.perf_counter() - t0_embed
-                print(
-                    f"[Embedding] {global_idx+1}/{n_folders} folders "
-                    f"({percent}%) | Elapsed: {elapsed:.1f} s"
-                )
+
+                if global_idx > 0:
+                    avg_per_folder = elapsed / (global_idx + 1)
+                    remaining_folders = n_folders - (global_idx + 1)
+                    remaining = avg_per_folder * remaining_folders
+                    print(
+                        f"[Embedding] {global_idx+1}/{n_folders} folders "
+                        f"({percent}%) | Elapsed: {hms(elapsed)} | Remaining: {hms(remaining)}"
+                    )
+                else:
+                    print(
+                        f"[Embedding] {global_idx+1}/{n_folders} folders "
+                        f"({percent}%) | Elapsed: {hms(elapsed)}"
+                    )
 
             Z = compute_embeddings_for_drug_folder(
                 student,
@@ -299,7 +328,9 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         q_cls = np.asarray(q_cls, dtype=np.int32)
 
         torch.save({"embeddings": embeddings, "q_cls": q_cls}, emb_cache_path)
-        print("Cached embeddings saved.")
+
+        elapsed = time.perf_counter() - t0_embed
+        print(f"Embedding total time: {hms(elapsed)}")
 
     # ======================================================================
     # 4) BUILD CLASS EMBEDDINGS ONLY FOR THE EMD SUBSET
@@ -351,6 +382,7 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         processes.append(p)
 
     last_percent = -1
+    t0_hybrid = time.perf_counter()
 
     while any(p.is_alive() for p in processes):
 
@@ -360,10 +392,23 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         percent = int(100.0 * done / total_pairs) if total_pairs > 0 else 100
 
         if percent != last_percent:
-            print(
-                f"[Hybrid] Distances computed: {done}/{total_pairs} "
-                f"({percent}%)"
-            )
+
+            elapsed = time.perf_counter() - t0_hybrid
+
+            if done > 0:
+                avg_per_pair = elapsed / done
+                remaining_pairs = total_pairs - done
+                remaining = avg_per_pair * remaining_pairs
+                print(
+                    f"[Hybrid] Distances computed: {done}/{total_pairs} "
+                    f"({percent}%) | Elapsed: {hms(elapsed)} | Remaining: {hms(remaining)}"
+                )
+            else:
+                print(
+                    f"[Hybrid] Distances computed: {done}/{total_pairs} "
+                    f"({percent}%) | Elapsed: {hms(elapsed)}"
+                )
+
             last_percent = percent
 
         time.sleep(5)
@@ -424,8 +469,7 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
 
     print("\n================ HYBRID RUN FINISHED ================\n")
     print(f"Processes: {n_processes} | Threads: {n_threads}")
-    print(f"Total time: {total_time:.3f} s")
+    print(f"Total time: {hms(total_time)}")
     print(f"Mean time per pair: {mean_time:.6f} s")
 
     return total_time, mean_time, valid_drugs
-

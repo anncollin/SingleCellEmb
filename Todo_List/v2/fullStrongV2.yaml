@@ -1,4 +1,4 @@
-experiment_name: "test"
+experiment_name: "fullStrongV2"
 
 # Dataset
 image_size: 96
@@ -6,15 +6,15 @@ in_channels: 2
 
 # ViT / DINO settings
 patch_size: 8
-out_dim: 256
+out_dim: 768
 architecture: tiny  
 
 # Training
 batch_size: 64
-epochs: 5
+epochs: 200
 learning_rate: 1e-4
 weight_decay: 0.05
-num_workers: 4
+num_workers: 0
 
 # DINO Multi-crop
 global_crops_scale: [0.5, 0.9]
@@ -23,33 +23,33 @@ local_crops_number: 6
 
 # Augmentation settings
 augment:
-  elastic_p: 0.0
+  elastic_p: 0.6
   elastic_alpha_range: [4.0, 8.0] 
   elastic_sigma_range: [30.0, 40.0] 
 
-  solarization_p: 0.0
+  solarization_p: 0.7
 
-  brightness_dapi_p: 0.0
+  brightness_dapi_p: 0.4
   brightness_dapi_range: [0.5, 3.0]
 
-  brightness_egfp_p: 0.0
+  brightness_egfp_p: 0.4
   brightness_egfp_range: [0.5, 2.0]
 
-  contrast_p: 0.0
+  contrast_p: 0.5
   contrast_range: [0.9, 1.1]
 
   rotation_degrees: [-180, 180]      
 
-  blur_global_p: 0.5
+  blur_global_p: 0.4
   blur_global_sigma: [1.0, 5.0]
 
-  blur_local_p: 0.2
+  blur_local_p: 0.4
   blur_local_sigma: [0.1, 0.5]
 
-  noise_global_p: 0.0
+  noise_global_p: 0.4
   noise_global_std: [0.001, 0.003]
 
-  noise_local_p: 0.0
+  noise_local_p: 0.4
   noise_local_std: [0.001, 0.003]
 
 # EMA

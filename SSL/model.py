@@ -89,31 +89,42 @@ class DINOStudent(nn.Module):
 
 
 #######################################################################################################
-# CREATE VIT-SMALL BACKBONE
+# CREATE VIT BACKBONE (TINY OR SMALL)
 # ----------------------------------------------------------------------------------------------------
-# Accepts variable input image sizes (needed for multi-crop: 96x96 and 48x48).
+# Accepts variable input image sizes and variable architecture.
 #
 #    Parameters:
 #    ---------------------------
+#    architecture : str
+#        Either "tiny" or "small".
+#
 #    patch_size : int
-#        ViT patch size. For DINO-8 use 8.
+#        ViT patch size.
 #
 #    in_chans : int
-#        Number of input channels (e.g. 2 for DAPI + fibrillarin).
+#        Number of input channels.
 #
 #    Returns:
 #    ---------------------------
 #    backbone : nn.Module
-#        ViT backbone model outputting feature vectors without a classifier head.
+#        ViT backbone.
 #######################################################################################################
 def create_vit_small_backbone(
+    architecture: str = "tiny",
     patch_size: int = 8,
     in_chans: int = 2,
 ) -> nn.Module:
-    # img_size=None allows multi-crop of any spatial size (48, 96, etc.)
-    # vit_small_patch8_224
+
+    # Map architecture name → timm model
+    if architecture == "tiny":
+        model_name = "vit_tiny_patch16_224"
+    elif architecture == "small":
+        model_name = "vit_small_patch16_224"
+    else:
+        raise ValueError(f"Unknown architecture '{architecture}'. Use 'tiny' or 'small'.")
+
     model = timm.create_model(
-        "vit_tiny_patch16_224",
+        model_name,
         img_size=None,
         dynamic_img_size=True,
         patch_size=patch_size,
@@ -121,3 +132,4 @@ def create_vit_small_backbone(
         num_classes=0,
     )
     return model
+

@@ -1,72 +1,33 @@
 import math
+import time
 from typing import Dict
 
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
-import random
 import numpy as np
-from sklearn.metrics import silhouette_score
+import random
 import wandb
 
 from Dataset.data_loader import CellDataset
 from SSL.transforms import KorniaMultiCropTransform
 from SSL.model import create_vit_small_backbone, DINOHead, DINOStudent
 from SSL.loss import DINOLoss
-from SSL.utils import update_teacher, ensure_dir, save_checkpoint, visualize_multicrop
+from SSL.utils import update_teacher, ensure_dir, save_checkpoint
 
 
 #######################################################################################################
-# COMPUTE SILHOUETTE SCORE (FAIL-SAFE VERSION)
+# TIME FORMATTER
 #######################################################################################################
-@torch.no_grad()
-def compute_silhouette(student, dataset, gpu_transform, device="cuda", num_samples=500):
-
-    try:
-        student.eval()
-
-        N = min(num_samples, len(dataset))
-        if N < 2:
-            print("Warning: Not enough samples for silhouette score.")
-            return float("nan")
-
-        idxs = random.sample(range(len(dataset)), N)
-
-        embeddings = []
-        labels = []
-
-        for idx in idxs:
-
-            img = dataset[idx].unsqueeze(0).to(device)
-
-            crops = gpu_transform(img)
-            img = crops[0]
-
-            z = student.backbone(img).squeeze(0).cpu().numpy()
-            embeddings.append(z)
-
-            path = dataset.npy_files[random.randrange(len(dataset.npy_files))]
-            labels.append(1 if "siRNA" in path else 0)
-
-        embeddings = np.stack(embeddings)
-        labels = np.array(labels)
-
-        # Silhouette requires at least 2 distinct labels
-        if len(np.unique(labels)) < 2:
-            print("Warning: Only one class present in silhouette labels.")
-            return float("nan")
-
-        return silhouette_score(embeddings, labels)
-
-    except Exception as e:
-        print(f"Warning: Silhouette computation failed: {str(e)}")
-        return float("nan")
-
+def hms(seconds: float) -> str:
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds % 60
+    return f"{h}h {m}m {s:.1f}s"
 
 
 #######################################################################################################
-# COMPUTE ALL METRICS (GPU MULTI-CROP COMPATIBLE)
+# COMPUTE BASIC METRICS
 #######################################################################################################
 @torch.no_grad()
 def compute_all_metrics(student, teacher, dataloader, gpu_transform, device="cuda", num_batches=5):
@@ -74,12 +35,10 @@ def compute_all_metrics(student, teacher, dataloader, gpu_transform, device="cud
     student.eval()
     teacher.eval()
 
-    student_entropies = []
-    teacher_entropies = []
-
-    student_embeddings = []
-    teacher_embeddings = []
-
+    student_ent = []
+    teacher_ent = []
+    student_emb = []
+    teacher_emb = []
     cosine_sims = []
     proto_indices = []
 
@@ -97,82 +56,68 @@ def compute_all_metrics(student, teacher, dataloader, gpu_transform, device="cud
         h_s = student.backbone(x)
         h_t = teacher.backbone(x)
 
-        p_s = torch.softmax(z_s, dim=-1) + 1e-12
-        p_t = torch.softmax(z_t, dim=-1) + 1e-12
+        ps = torch.softmax(z_s, dim=-1) + 1e-12
+        pt = torch.softmax(z_t, dim=-1) + 1e-12
 
-        student_entropies.append(float(-(p_s * p_s.log()).sum(dim=1).mean()))
-        teacher_entropies.append(float(-(p_t * p_t.log()).sum(dim=1).mean()))
+        student_ent.append(float(-(ps * ps.log()).sum(dim=1).mean()))
+        teacher_ent.append(float(-(pt * pt.log()).sum(dim=1).mean()))
 
-        student_embeddings.append(h_s.cpu())
-        teacher_embeddings.append(h_t.cpu())
+        student_emb.append(h_s.cpu())
+        teacher_emb.append(h_t.cpu())
 
-        z_s_norm = z_s / (z_s.norm(dim=-1, keepdim=True) + 1e-12)
-        z_t_norm = z_t / (z_t.norm(dim=-1, keepdim=True) + 1e-12)
-        cosine_sims.append(float((z_s_norm * z_t_norm).sum(dim=-1).mean()))
+        zs_n = z_s / (z_s.norm(dim=-1, keepdim=True) + 1e-12)
+        zt_n = z_t / (z_t.norm(dim=-1, keepdim=True) + 1e-12)
+        cosine_sims.append(float((zs_n * zt_n).sum(dim=-1).mean()))
 
-        proto_idx = z_s.argmax(dim=-1).cpu()
-        proto_indices.append(proto_idx)
+        idx = z_s.argmax(dim=-1).cpu()
+        proto_indices.append(idx)
 
-    student_entropy = float(np.mean(student_entropies))
-    teacher_entropy = float(np.mean(teacher_entropies))
-
-    student_embeddings = torch.cat(student_embeddings, dim=0)
-    teacher_embeddings = torch.cat(teacher_embeddings, dim=0)
-
-    student_feature_var = float(student_embeddings.var(dim=0).mean())
-    teacher_feature_var = float(teacher_embeddings.var(dim=0).mean())
-
-    student_teacher_cosine = float(np.mean(cosine_sims))
+    student_emb = torch.cat(student_emb, dim=0)
+    teacher_emb = torch.cat(teacher_emb, dim=0)
 
     proto_indices = torch.cat(proto_indices, dim=0)
     out_dim = proto_indices.max().item() + 1
     counts = torch.bincount(proto_indices, minlength=out_dim).float()
 
-    active_dim_fraction = float((counts > 0).sum().item() / counts.numel())
-    max_dim_frequency = float(counts.max().item() / proto_indices.numel())
-
     return {
-        "student_entropy": student_entropy,
-        "teacher_entropy": teacher_entropy,
-        "student_feature_variance": student_feature_var,
-        "teacher_feature_variance": teacher_feature_var,
-        "student_teacher_cosine": student_teacher_cosine,
-        "active_dimension_fraction": active_dim_fraction,
-        "max_dimension_frequency": max_dim_frequency,
+        "student_entropy": float(np.mean(student_ent)),
+        "teacher_entropy": float(np.mean(teacher_ent)),
+        "student_feature_variance": float(student_emb.var(dim=0).mean()),
+        "teacher_feature_variance": float(teacher_emb.var(dim=0).mean()),
+        "student_teacher_cosine": float(np.mean(cosine_sims)),
+        "active_dimension_fraction": float((counts > 0).sum().item() / counts.numel()),
+        "max_dimension_frequency": float(counts.max().item() / proto_indices.numel()),
     }
 
 
 #######################################################################################################
-# TRAIN ONE EPOCH OF DINO (HARD-CODED 10% DATASET)
+# TRAIN ONE EPOCH
 #######################################################################################################
 def train_one_epoch(
     student,
     teacher,
     dino_loss: DINOLoss,
     dataloader: DataLoader,
-    optimizer: torch.optim.Optimizer,
+    optimizer,
     epoch: int,
     gpu_transform,
-    use_wandb: bool, 
-    device: str = "cuda",
-    base_momentum: float = 0.996,
-    max_momentum: float = 1.0,
-) -> float:
-
+    use_wandb: bool,
+    device="cuda",
+    base_momentum=0.996,
+    max_momentum=1.0,
+):
     student.train()
     teacher.eval()
 
     total_loss = 0.0
     n_batches = 0
 
-    # ---- HARD-CODE: USE ONLY 10% OF DATASET PER EPOCH ----
     total_batches = len(dataloader)
-    max_batches = max(1, int(0.1 * total_batches))
-    # --------------------------------------------------------
+    max_batches = max(1, int(0.1 * total_batches))  # hardcoded 10%
 
-    dataloader = tqdm(dataloader, desc=f"Epoch {epoch+1}", ncols=100, disable=use_wandb)
+    data_iter = tqdm(dataloader, desc=f"Epoch {epoch+1}", ncols=100, disable=use_wandb)
 
-    for it, images in enumerate(dataloader):
+    for it, images in enumerate(data_iter):
 
         if it >= max_batches:
             break
@@ -180,7 +125,6 @@ def train_one_epoch(
         images = images.to(device, non_blocking=True)
 
         crops = gpu_transform(images)
-
         student_outputs = [student(c) for c in crops]
         teacher_outputs = [teacher(crops[0]), teacher(crops[1])]
 
@@ -199,13 +143,13 @@ def train_one_epoch(
         total_loss += float(loss.item())
         n_batches += 1
 
-        dataloader.set_postfix(loss=float(loss.item()))
+        data_iter.set_postfix(loss=float(loss.item()))
 
     return total_loss / max(1, n_batches)
 
 
 #######################################################################################################
-# RUN DINO EXPERIMENT (CLEAN PIPELINE, HARD-CODED 10%)
+# MAIN DINO TRAINING
 #######################################################################################################
 def run_dino_experiment(cfg: Dict):
 
@@ -215,16 +159,15 @@ def run_dino_experiment(cfg: Dict):
         wandb.finish()
         wandb.init(project="DINO", name=cfg.get("experiment_name", "DINO_run"))
         wandb.config.update(cfg, allow_val_change=True)
-    else:
-        print("Running WITHOUT wandb logging.")
 
     data_root = cfg["data_root"]
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    image_size = int(cfg.get("image_size", 96))
-    in_chans   = int(cfg.get("in_channels", 2))
-    patch_size = int(cfg.get("patch_size", 8))
-    out_dim    = int(cfg.get("out_dim", 8192))
+    image_size   = int(cfg.get("image_size", 96))
+    in_chans     = int(cfg.get("in_channels", 2))
+    patch_size   = int(cfg.get("patch_size", 8))
+    out_dim      = int(cfg.get("out_dim", 768))
+    architecture = str(cfg.get("architecture", "tiny"))
 
     batch_size   = int(cfg.get("batch_size", 64))
     epochs       = int(cfg.get("epochs", 50))
@@ -234,13 +177,13 @@ def run_dino_experiment(cfg: Dict):
     num_workers        = int(cfg.get("num_workers", 4))
     local_crops_number = int(cfg.get("local_crops_number", 6))
 
-    global_crops_scale = tuple(float(v) for v in cfg.get("global_crops_scale", [0.4, 1.0]))
-    local_crops_scale  = tuple(float(v) for v in cfg.get("local_crops_scale", [0.1, 0.4]))
+    global_crops_scale = tuple(cfg.get("global_crops_scale", [0.4, 1.0]))
+    local_crops_scale  = tuple(cfg.get("local_crops_scale", [0.1, 0.4]))
 
     base_momentum = float(cfg.get("base_momentum", 0.996))
     max_momentum  = float(cfg.get("max_momentum", 1.0))
 
-    experiment_name = str(cfg.get("experiment_name", "DINO_experiment"))
+    experiment_name = cfg.get("experiment_name", "DINO_experiment")
     results_root    = ensure_dir(f"./Results/{experiment_name}")
     checkpoints_dir = ensure_dir(f"{results_root}/checkpoints")
 
@@ -261,22 +204,22 @@ def run_dino_experiment(cfg: Dict):
         pin_memory=True,
         drop_last=True,
     )
-    # ----------- start : visualization of DA -----------
-    #visualize_multicrop(dataset=dataset, gpu_transform=gpu_transform, device=device, channel_display="rgb")   
-    # ----------- end : visualization of DA -----------
 
     backbone_student = create_vit_small_backbone(
+        architecture=architecture,
         patch_size=patch_size,
         in_chans=in_chans,
     )
     backbone_teacher = create_vit_small_backbone(
+        architecture=architecture,
         patch_size=patch_size,
         in_chans=in_chans,
     )
 
     embed_dim = backbone_student.num_features
-    head_student = DINOHead(in_dim=embed_dim, out_dim=out_dim)
-    head_teacher = DINOHead(in_dim=embed_dim, out_dim=out_dim)
+
+    head_student = DINOHead(embed_dim, out_dim)
+    head_teacher = DINOHead(embed_dim, out_dim)
 
     student = DINOStudent(backbone_student, head_student).to(device)
     teacher = DINOStudent(backbone_teacher, head_teacher).to(device)
@@ -302,43 +245,43 @@ def run_dino_experiment(cfg: Dict):
         betas=(0.9, 0.95),
     )
 
+    t0 = time.perf_counter()
+
     for epoch in range(epochs):
 
-        avg_loss = train_one_epoch(
-            student=student,
-            teacher=teacher,
-            dino_loss=dino_loss,
-            dataloader=dataloader,
-            optimizer=optimizer,
-            epoch=epoch,
-            gpu_transform=gpu_transform,
-            use_wandb=use_wandb,
-            device=device,
-            base_momentum=base_momentum,
-            max_momentum=max_momentum,
+        # Time estimation
+        elapsed = time.perf_counter() - t0
+        avg_epoch = elapsed / (epoch + 1)
+        remaining = avg_epoch * (epochs - epoch - 1)
+        print(
+            f"[Time] Epoch {epoch+1}/{epochs} | "
+            f"Elapsed: {hms(elapsed)} | Remaining: {hms(remaining)}"
         )
 
-        metrics = compute_all_metrics(
-            student, teacher, dataloader, gpu_transform, device=device, num_batches=5
+        avg_loss = train_one_epoch(
+            student,
+            teacher,
+            dino_loss,
+            dataloader,
+            optimizer,
+            epoch,
+            gpu_transform,
+            use_wandb,
+            device,
+            base_momentum,
+            max_momentum,
         )
+
+        metrics = compute_all_metrics(student, teacher, dataloader, gpu_transform, device)
 
         if use_wandb:
             wandb.log(metrics, step=epoch)
             wandb.log({"loss": avg_loss}, step=epoch)
 
-        if (epoch + 1) % 5 == 0:
-            sil = compute_silhouette(
-                student, dataset, gpu_transform, device=device, num_samples=500
-            )
-            if use_wandb:
-                wandb.log({"silhouette": sil}, step=epoch)
-            print(f"Silhouette score at epoch {epoch+1}: {sil:.4f}")
+        print(f"[{experiment_name}] Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f}")
 
-        print(f"[{experiment_name}] Epoch {epoch+1}/{epochs} - DINO loss: {avg_loss:.4f}")
-
-    final_ckpt = f"{checkpoints_dir}/final_weights.pth"
     save_checkpoint(
-        final_ckpt,
+        f"{checkpoints_dir}/final_weights.pth",
         {
             "epoch": epochs,
             "student_state_dict": student.state_dict(),
@@ -348,7 +291,5 @@ def run_dino_experiment(cfg: Dict):
         },
     )
 
-    print(f"[{experiment_name}] Train finished. Checkpoints saved to {checkpoints_dir}.")
-    print(f"[{experiment_name}] Saved final weights to {final_ckpt}.")
-
+    print(f"[Done] Saved final checkpoint.")
     return student, teacher
