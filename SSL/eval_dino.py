@@ -238,19 +238,24 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     student = load_trained_student(ckpt, cfg, device=device)
 
     # ======================================================================
-    # 1) ALWAYS LOAD FULL DATASET FOR EMBEDDINGS
+    # 1) LOAD FOLDERS ONLY IF CACHE DOES NOT EXIST
     # ======================================================================
     all_drugs = load_drug_list(cfg["label_path"])
     print(f"Embedding on FULL dataset: {len(all_drugs)} drugs")
 
-    all_valid_drugs = []
-    folder_list = []
-
-    for drug in all_drugs:
-        folder = get_npy_folder_from_drug(drug, cfg)  # still uses label_path internally
-        if folder is not None:
-            all_valid_drugs.append(drug)
-            folder_list.append(folder)
+    if os.path.isfile(emb_cache_path):
+        print("cached_embeddings.pt found → skipping folder detection")
+        all_valid_drugs = all_drugs
+        folder_list = []
+    else:
+        print("cached_embeddings.pt not found → locating dataset folders")
+        all_valid_drugs = []
+        folder_list = []
+        for drug in all_drugs:
+            folder = get_npy_folder_from_drug(drug, cfg)
+            if folder is not None:
+                all_valid_drugs.append(drug)
+                folder_list.append(folder)
 
     print(f"Valid embedding folders found: {len(folder_list)}")
 
@@ -266,57 +271,33 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         emd_suffix = ""
         print("Computing EMD on FULL label subset")
 
-    # Keep only subset drugs that actually have embeddings
     valid_drugs = [d for d in subset_drugs if d in all_valid_drugs]
     D = len(valid_drugs)
-
     print(f"Valid EMD drugs: {D}")
 
     # ======================================================================
     # 3) EMBEDDING CACHE (ALWAYS FULL DATASET)
     # ======================================================================
-    hostname = socket.gethostname()
-    has_dataset = ("OMEN" in hostname) or ("orion" in hostname)
-
-    all_drugs = load_drug_list(cfg["label_path"])
-    print(f"Embedding on FULL dataset: {len(all_drugs)} drugs")
-
-    # ----------------------------------------------------
-    # CASE 1 — NO DATASET ACCESS (new remote server)
-    # ----------------------------------------------------
-    if not has_dataset:
-        print("Dataset not accessible → skipping folder search.")
-        print("Assuming embeddings were computed previously.")
-
-        # Try to infer ordering directly from cached_embeddings.pt
-        if not os.path.isfile(emb_cache_path):
-            raise RuntimeError(
-                f"You must copy cached_embeddings.pt to: {emb_cache_path}"
-            )
-
-        # We cannot reconstruct folder_list, but we do not need it.
-        all_valid_drugs = all_drugs  
-        folder_list = []             # unused
-        
-        print(f"Valid drugs (cached only): {len(all_valid_drugs)}")
-
-    # ----------------------------------------------------
-    # CASE 2 — Local machine with dataset
-    # ----------------------------------------------------
+    if os.path.isfile(emb_cache_path):
+        cache = torch.load(emb_cache_path, map_location="cpu")
+        embeddings = cache["embeddings"]
+        q_cls      = cache["q_cls"]
     else:
-        all_valid_drugs = []
-        folder_list = []
+        all_embeddings = []
+        q_cls = []
+        n_folders = len(folder_list)
+        t0_embed = time.perf_counter()
 
-        for drug in all_drugs:
-            print("xxxxxxxxxxxxxxxxxxxxxxxxxxxxx not here !!!!!")
-            folder = get_npy_folder_from_drug(drug, cfg)
-            if folder is not None:
-                all_valid_drugs.append(drug)
-                folder_list.append(folder)
+        for global_idx, folder in enumerate(folder_list):
+            Z = compute_embeddings_for_drug_folder(
+                student, folder, device=device, batch_size=128
+            )
+            all_embeddings.append(Z)
+            q_cls.extend([global_idx] * Z.shape[0])
 
-        print(f"Valid embedding folders found: {len(folder_list)}")
-
-
+        embeddings = torch.cat(all_embeddings, dim=0).cpu()
+        q_cls = np.asarray(q_cls, dtype=np.int32)
+        torch.save({"embeddings": embeddings, "q_cls": q_cls}, emb_cache_path)
 
     # ======================================================================
     # 4) BUILD CLASS EMBEDDINGS ONLY FOR THE EMD SUBSET
@@ -324,7 +305,6 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     emb_np = embeddings.numpy()
 
     subset_indices = [all_valid_drugs.index(d) for d in valid_drugs]
-
     unique_classes = list(range(len(subset_indices)))
     class_embeddings = {}
 
@@ -410,14 +390,8 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     Dmat = np.zeros((D, D), dtype=np.float32)
 
     for pid in range(n_processes):
-
         block_path = os.path.join(results_root, f"emd_block_proc{pid}.npy")
-
-        if not os.path.isfile(block_path):
-            raise RuntimeError(f"Missing block file: {block_path}")
-
         block = np.load(block_path)
-
         for i, j, dist in block:
             i = int(i)
             j = int(j)
@@ -438,13 +412,10 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     # 7) CLEANUP
     # ======================================================================
     for pid in range(n_processes):
-
         block_path = os.path.join(results_root, f"emd_block_proc{pid}.npy")
         tmp_path   = block_path + ".tmp"
-
         if os.path.isfile(block_path):
             os.remove(block_path)
-
         if os.path.isfile(tmp_path):
             os.remove(tmp_path)
 
@@ -459,3 +430,4 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     print(f"Mean time per pair: {mean_time:.6f} s")
 
     return total_time, mean_time, valid_drugs
+
