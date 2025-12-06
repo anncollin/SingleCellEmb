@@ -276,90 +276,46 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     # 3) EMBEDDING CACHE (ALWAYS FULL DATASET)
     # ======================================================================
 
-    hostname = socket.gethostname()
+   hostname = socket.gethostname()
     has_dataset = ("anncollin" in hostname) or ("orion" in hostname)
 
-    # -------------------------------------------------------------
-    # CASE 1 — Running on a machine WITHOUT dataset access
-    # -------------------------------------------------------------
+    all_drugs = load_drug_list(cfg["label_path"])
+    print(f"Embedding on FULL dataset: {len(all_drugs)} drugs")
+
+    # ----------------------------------------------------
+    # CASE 1 — NO DATASET ACCESS (new remote server)
+    # ----------------------------------------------------
     if not has_dataset:
+        print("Dataset not accessible → skipping folder search.")
+        print("Assuming embeddings were computed previously.")
 
-        print("Dataset is NOT accessible on this machine.")
-        print("I will ONLY load existing cached embeddings, and will NOT compute new ones.")
-
+        # Try to infer ordering directly from cached_embeddings.pt
         if not os.path.isfile(emb_cache_path):
             raise RuntimeError(
-                f"No cached embeddings found at {emb_cache_path}. "
-                "You must first copy cached_embeddings.pt from a machine with dataset access."
+                f"You must copy cached_embeddings.pt to: {emb_cache_path}"
             )
 
-        print("Loading cached embeddings...")
-        cache = torch.load(emb_cache_path, map_location="cpu")
-        embeddings = cache["embeddings"]
-        q_cls      = cache["q_cls"]
+        # We cannot reconstruct folder_list, but we do not need it.
+        all_valid_drugs = all_drugs  
+        folder_list = []             # unused
+        
+        print(f"Valid drugs (cached only): {len(all_valid_drugs)}")
 
-    # -------------------------------------------------------------
-    # CASE 2 — Running on anncollin/orion with dataset available
-    # -------------------------------------------------------------
+    # ----------------------------------------------------
+    # CASE 2 — Local machine with dataset
+    # ----------------------------------------------------
     else:
+        all_valid_drugs = []
+        folder_list = []
 
-        if os.path.isfile(emb_cache_path):
+        for drug in all_drugs:
+            folder = get_npy_folder_from_drug(drug, cfg)
+            if folder is not None:
+                all_valid_drugs.append(drug)
+                folder_list.append(folder)
 
-            print("Loading cached embeddings...")
-            cache = torch.load(emb_cache_path, map_location="cpu")
-            embeddings = cache["embeddings"]
-            q_cls      = cache["q_cls"]
+        print(f"Valid embedding folders found: {len(folder_list)}")
 
-        else:
-
-            print("Computing embeddings (first run on FULL dataset)...")
-
-            all_embeddings = []
-            q_cls = []
-
-            n_folders = len(folder_list)
-            t0_embed = time.perf_counter()
-
-            for global_idx, folder in enumerate(folder_list):
-
-                percent = int(100.0 * (global_idx + 1) / n_folders)
-                prev_percent = int(100.0 * global_idx / n_folders) if global_idx > 0 else -1
-
-                if percent != prev_percent:
-
-                    elapsed = time.perf_counter() - t0_embed
-
-                    if global_idx > 0:
-                        avg_per_folder = elapsed / (global_idx + 1)
-                        remaining_folders = n_folders - (global_idx + 1)
-                        remaining = avg_per_folder * remaining_folders
-                        print(
-                            f"[Embedding] {global_idx+1}/{n_folders} folders "
-                            f"({percent}%) | Elapsed: {hms(elapsed)} | Remaining: {hms(remaining)}"
-                        )
-                    else:
-                        print(
-                            f"[Embedding] {global_idx+1}/{n_folders} folders "
-                            f"({percent}%) | Elapsed: {hms(elapsed)}"
-                        )
-
-                Z = compute_embeddings_for_drug_folder(
-                    student,
-                    folder,
-                    device=device,
-                    batch_size=128,
-                )
-
-                all_embeddings.append(Z)
-                q_cls.extend([global_idx] * Z.shape[0])
-
-            embeddings = torch.cat(all_embeddings, dim=0).cpu()
-            q_cls = np.asarray(q_cls, dtype=np.int32)
-
-            torch.save({"embeddings": embeddings, "q_cls": q_cls}, emb_cache_path)
-
-            elapsed = time.perf_counter() - t0_embed
-            print(f"Embedding total time: {hms(elapsed)}")
 
 
     # ======================================================================
