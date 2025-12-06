@@ -276,7 +276,7 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     # 3) EMBEDDING CACHE (ALWAYS FULL DATASET)
     # ======================================================================
     hostname = socket.gethostname()
-    has_dataset = ("anncollin" in hostname) or ("orion" in hostname)
+    has_dataset = ("OMEN" in hostname) or ("orion" in hostname)
 
     all_drugs = load_drug_list(cfg["label_path"])
     print(f"Embedding on FULL dataset: {len(all_drugs)} drugs")
