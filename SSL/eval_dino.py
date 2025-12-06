@@ -307,8 +307,8 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         all_valid_drugs = []
         folder_list = []
 
-        for drug in all_drugs:$
-        print("xxxxxxxxxxxxxxxxxxxxxxxxxxxxx not here !!!!!")
+        for drug in all_drugs:
+            print("xxxxxxxxxxxxxxxxxxxxxxxxxxxxx not here !!!!!")
             folder = get_npy_folder_from_drug(drug, cfg)
             if folder is not None:
                 all_valid_drugs.append(drug)
