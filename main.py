@@ -109,7 +109,8 @@ def main():
         else:
             raise RuntimeError(
                 f"Unknown hostname '{hostname}'. "
-                "Please add a data_root path for this machine."
+                cfg["label_path"]        = "/dataset/unique_drugs.csv"
+                cfg["callibration_path"] = "/dataset/callibration.csv"
             )
         # ----------------------------------------------------------------------
 
