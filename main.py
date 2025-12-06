@@ -108,8 +108,8 @@ def main():
 
         else:
             print("Warning: you do not have access to the dataset from here!")
-            cfg["label_path"]        = "/dataset/unique_drugs.csv"
-            cfg["callibration_path"] = "/dataset/callibration.csv"
+            cfg["label_path"]        = "/Dataset/unique_drugs.csv"
+            cfg["callibration_path"] = "/Dataset/callibration.csv"
         # ----------------------------------------------------------------------
 
         # ----------------------------------------------------------------------
