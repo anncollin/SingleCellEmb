@@ -107,11 +107,9 @@ def main():
             cfg["callibration_path"] = "/DATA/annso/labels/callibration.csv"
 
         else:
-            raise RuntimeError(
-                f"Unknown hostname '{hostname}'. "
-                cfg["label_path"]        = "/dataset/unique_drugs.csv"
-                cfg["callibration_path"] = "/dataset/callibration.csv"
-            )
+            print("Warning: you do not have access to the dataset from here!")
+            cfg["label_path"]        = "/dataset/unique_drugs.csv"
+            cfg["callibration_path"] = "/dataset/callibration.csv"
         # ----------------------------------------------------------------------
 
         # ----------------------------------------------------------------------
