@@ -39,5 +39,5 @@ wait_for_and_run() {
 # Call the function for one or multiple experiments
 # ------------------------------------------------------------
 
-wait_for_and_run "tiny8-256_brightDAPI_zoom90-100" "td2"
+wait_for_and_run "tiny8-256_brightDAPI+EGFP_zoom70-90" "td1"
 

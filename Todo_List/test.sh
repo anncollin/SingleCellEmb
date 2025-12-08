@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Macros
-main_folder="/home/anncollin/SingleCellEmb"
+main_folder="/home/anncollin/Desktop/Nucleoles/SingleCellEmb"
 
 # ------------------------------------------------------------
 # Function: wait_for_and_run
@@ -39,5 +39,7 @@ wait_for_and_run() {
 # Call the function for one or multiple experiments
 # ------------------------------------------------------------
 
-wait_for_and_run "tiny8-256_brightDAPI_zoom90-100" "td2"
+wait_for_and_run "tiny8-128_lightDA" "v2"
+wait_for_and_run "tiny16-128_lightDA" "v2"
+wait_for_and_run "tiny32-128_lightDA" "v2"
 

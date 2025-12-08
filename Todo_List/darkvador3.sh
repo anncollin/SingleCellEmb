@@ -1,27 +1,43 @@
 #!/bin/bash
 
-exp_name="tiny8-256_NoBlur+NoBright_zoom70-90"
-td_folder="td3"
+# Macros
+main_folder="/home/anncollin/SingleCellEmb"
 
-FILE="/home/anncollin/SingleCellEmb/Results/${exp_name}/${exp_name}_EMD_callibration.csv"
+# ------------------------------------------------------------
+# Function: wait_for_and_run
+# Parameters:
+#   $1 = exp_name
+#   $2 = td_folder
+# ------------------------------------------------------------
+wait_for_and_run() {
 
-# Wait until the file exists
-while [ ! -e "$FILE" ]; do
-    sleep 10
-done
+    exp_name="$1"
+    td_folder="$2"
 
-# Run your command
-python main_py --todo Todo_List/${td_folder}/${exp_name}.yaml --eval
+    FILE="${main_folder}/Results/${exp_name}/DINO_${exp_name}_EMD_callibration.csv"
 
-############################################
-exp_namebis="tiny8-256_sharpness_zoom70-90"
+    echo "============================================"
+    echo "Waiting for:  ${FILE}"
+    echo "Experiment:   ${exp_name}"
+    echo "Todo version: ${td_folder}"
+    echo "============================================"
+    echo ""
 
-FILEbis="/home/anncollin/SingleCellEmb/Results/${exp_name}/${exp_name}_EMD_callibration.csv"
+    # Wait loop
+    while [ ! -e "$FILE" ]; do
+        echo "$(date '+%H:%M:%S')  File not found yet…"
+        sleep 120
+    done
 
-# Wait until the file exists
-while [ ! -e "$FILEbis" ]; do
-    sleep 10
-done
+    python "${main_folder}/main.py" \
+        --todo "${main_folder}/Todo_List/${td_folder}/${exp_name}.yaml" \
+        --eval
 
-# Run your command
-python main_py --todo Todo_List/${td_folder}/${exp_namebis}.yaml --eval
+}
+
+# ------------------------------------------------------------
+# Call the function for one or multiple experiments
+# ------------------------------------------------------------
+
+wait_for_and_run "tiny8-256_sharpness_zoom70-90" "td3"
+
