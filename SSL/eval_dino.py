@@ -232,7 +232,7 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     results_root    = ensure_dir(f"./Results/{experiment_name}")
     ensure_dir(results_root)
 
-    ckpt = os.path.join(results_root, "checkpoints", "final_weights.pth")
+    ckpt = f"{os.getcwd()}/Results/{experiment_name}/checkpoints/final_weights.pth"
     emb_cache_path = os.path.join(results_root, "cached_embeddings.pt")
 
     student = load_trained_student(ckpt, cfg, device=device)
