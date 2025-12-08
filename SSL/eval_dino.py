@@ -229,13 +229,14 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     experiment_name = str(cfg.get("experiment_name", "DINO_experiment"))
-    results_root    = ensure_dir(f"./Results/{experiment_name}")
-    ensure_dir(results_root)
+    base_dir        = os.getcwd()[:-10] if os.getcwd().endswith("/Todo_List") else os.getcwd()
+    results_root    = ensure_dir(f"{base_dir}/Results/{experiment_name}")
 
-    ckpt = f"{(os.getcwd()[:-10] if os.getcwd().endswith('/Todo_List') else os.getcwd())}/Results/{experiment_name}/checkpoints/final_weights.pth"
+    ckpt           = f"{base_dir}/Results/{experiment_name}/checkpoints/final_weights.pth"
     emb_cache_path = os.path.join(results_root, "cached_embeddings.pt")
 
     student = load_trained_student(ckpt, cfg, device=device)
+
 
     # ======================================================================
     # 1) LOAD FOLDERS ONLY IF CACHE DOES NOT EXIST
