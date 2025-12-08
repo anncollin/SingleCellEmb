@@ -28,6 +28,40 @@ class RandomChannelBrightness(nn.Module):
         x = x.clone()
         x[:, self.channel_idx] = (x[:, self.channel_idx] * factor).clamp(0.0, 1.0)
         return x
+    
+class CenteredRandomResizedCrop(nn.Module):
+    def __init__(self, out_size, scale):
+        super().__init__()
+        self.out = out_size
+        self.scale = scale
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+
+        # pick a random crop ratio (0.2 → 0.9)
+        r = float(torch.empty(1, device=x.device).uniform_(*self.scale))
+
+        # crop size = r * original image size
+        crop_h = int(H * r)
+        crop_w = int(W * r)
+
+        # ensure crop is valid
+        crop_h = max(1, crop_h)
+        crop_w = max(1, crop_w)
+
+        # center coordinates
+        top  = (H - crop_h) // 2
+        left = (W - crop_w) // 2
+
+        # centered crop manually
+        x = x[:, :, top:top+crop_h, left:left+crop_w]
+
+        # resize to DINO output size
+        x = K.Resize((self.out, self.out), align_corners=False)(x)
+        return x
+
+
+
 
 
 #######################################################################################################
@@ -61,6 +95,9 @@ class KorniaMultiCropTransform(nn.Module):
 
         contrast_p     = float(aug.get("contrast_p", 0.0))
         contrast_range = tuple(aug.get("contrast_range", [0.8, 1.2]))
+
+        sharpness_p      = float(aug.get("sharpness_p", 0.0))
+        sharpness_factor = float(aug.get("sharpness_factor", 5.0))
 
         brightness_dapi_p     = float(aug.get("brightness_dapi_p", 0.0))
         brightness_dapi_range = tuple(aug.get("brightness_dapi_range", [1.0, 1.0]))
@@ -126,6 +163,14 @@ class KorniaMultiCropTransform(nn.Module):
                 )
             )
 
+        if sharpness_p > 0: 
+            strong_extra.append(
+                K.RandomSharpness(
+                    sharpness=sharpness_factor,
+                    p=sharpness_p,
+                )
+            )
+
         if solarization_p > 0:
             strong_extra.append(K.RandomSolarize(p=solarization_p))
 
@@ -146,7 +191,7 @@ class KorniaMultiCropTransform(nn.Module):
         # -----------------------
         if blur_global_p > 0:
             global_blur = K.RandomGaussianBlur(
-                kernel_size=(3, 3),
+                kernel_size=(9, 9),
                 sigma=blur_global_sigma,
                 p=blur_global_p,
             )
@@ -156,7 +201,7 @@ class KorniaMultiCropTransform(nn.Module):
         if noise_global_p > 0:
             global_noise = K.RandomGaussianNoise(
                 mean=0.0,
-                std=float(noise_global_std[1]),   # FIX: use a single float
+                std=float(noise_global_std[1]),  
                 p=noise_global_p,
             )
         else:
@@ -168,7 +213,7 @@ class KorniaMultiCropTransform(nn.Module):
         # -----------------------
         if blur_local_p > 0:
             local_blur = K.RandomGaussianBlur(
-                kernel_size=(3, 3),
+                kernel_size=(5, 5),
                 sigma=blur_local_sigma,
                 p=blur_local_p,
             )
@@ -178,7 +223,7 @@ class KorniaMultiCropTransform(nn.Module):
         if noise_local_p > 0:
             local_noise = K.RandomGaussianNoise(
                 mean=0.0,
-                std=float(noise_local_std[1]),   # FIX: use a single float
+                std=float(noise_local_std[1]),  
                 p=noise_local_p,
             )
         else:
@@ -189,16 +234,11 @@ class KorniaMultiCropTransform(nn.Module):
         # 6. GLOBAL PIPELINE
         # -----------------------
         self.global_transform = nn.Sequential(
-            K.RandomResizedCrop(
-                size=(image_size, image_size),
-                scale=global_crops_scale,
-                ratio=(1.0, 1.0),
-                p=1.0,
-            ),
+            rotation,
+            CenteredRandomResizedCrop(image_size, global_crops_scale),
             K.RandomHorizontalFlip(p=0.5),
             K.RandomVerticalFlip(p=0.5),
-            rotation,
-
+        
             global_blur,
             global_noise,
 
@@ -209,6 +249,7 @@ class KorniaMultiCropTransform(nn.Module):
         # 7. LOCAL PIPELINE
         # -----------------------
         self.local_transform = nn.Sequential(
+            rotation,
             K.RandomResizedCrop(
                 size=(local_size, local_size),
                 scale=local_crops_scale,
@@ -217,8 +258,7 @@ class KorniaMultiCropTransform(nn.Module):
             ),
             K.RandomHorizontalFlip(p=0.5),
             K.RandomVerticalFlip(p=0.5),
-            rotation,
-
+            
             local_blur,
             local_noise,
         )

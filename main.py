@@ -127,20 +127,17 @@ def main():
         # Default behavior: if neither flag is given, run both
         if not do_train and not do_eval:
             do_train = True
-            do_eval = True
+            do_eval  = True
 
         if do_train:
             print("Starting TRAIN phase...")
             run_dino_experiment(cfg)
-
-        use_callibration = True
-        if use_callibration:
             print("Starting EVAL phase on CALLIBRATION SUBSET...")
-        else:
-            print("Starting EVAL phase on FULL SUBSET...")
+            evaluate_dino_experiment(cfg, use_callibration=True)
 
-        evaluate_dino_experiment(cfg, use_callibration)
-        evaluate_dino_experiment(cfg, False)
+        if do_eval: 
+            print("Starting EVAL phase on FULL SUBSET...")
+            evaluate_dino_experiment(cfg, use_callibration=False)
 
 
 if __name__ == "__main__":

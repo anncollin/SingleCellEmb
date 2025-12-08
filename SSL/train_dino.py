@@ -10,6 +10,7 @@ import random
 import wandb
 
 from Dataset.data_loader import CellDataset
+from SSL.utils import visualize_multicrop
 from SSL.transforms import KorniaMultiCropTransform
 from SSL.model import create_vit_small_backbone, DINOHead, DINOStudent
 from SSL.loss import DINOLoss
@@ -124,7 +125,7 @@ def train_one_epoch(
 
         images = images.to(device, non_blocking=True)
 
-        crops = gpu_transform(images)
+        crops           = gpu_transform(images)
         student_outputs = [student(c) for c in crops]
         teacher_outputs = [teacher(crops[0]), teacher(crops[1])]
 
@@ -205,6 +206,10 @@ def run_dino_experiment(cfg: Dict):
         drop_last=True,
     )
 
+    # ------------------------------ visualize DA ------------------------------
+    visualize_multicrop(dataset, gpu_transform, device)
+    # --------------------------------------------------------------------------
+
     backbone_student = create_vit_small_backbone(
         architecture=architecture,
         patch_size=patch_size,
@@ -242,7 +247,7 @@ def run_dino_experiment(cfg: Dict):
         student.parameters(),
         lr=lr,
         weight_decay=weight_decay,
-        betas=(0.9, 0.95),
+        betas=(0.9, 0.999),
     )
 
     t0 = time.perf_counter()
