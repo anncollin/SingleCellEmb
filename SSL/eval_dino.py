@@ -280,25 +280,34 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     # 3) EMBEDDING CACHE (ALWAYS FULL DATASET)
     # ======================================================================
     if os.path.isfile(emb_cache_path):
+        print("Loading cached embeddings...")
         cache = torch.load(emb_cache_path, map_location="cpu")
         embeddings = cache["embeddings"]
         q_cls      = cache["q_cls"]
+        print(f"Loaded: {embeddings.shape[0]} embeddings")
     else:
+        print("No cache found → computing embeddings")
         all_embeddings = []
         q_cls = []
         n_folders = len(folder_list)
         t0_embed = time.perf_counter()
 
         for global_idx, folder in enumerate(folder_list):
+            print(f"[{global_idx+1}/{n_folders}] Computing embeddings for: {folder}")
             Z = compute_embeddings_for_drug_folder(
                 student, folder, device=device, batch_size=128
             )
+            print(f"  → got {Z.shape[0]} embeddings")
             all_embeddings.append(Z)
             q_cls.extend([global_idx] * Z.shape[0])
 
         embeddings = torch.cat(all_embeddings, dim=0).cpu()
         q_cls = np.asarray(q_cls, dtype=np.int32)
+
+        print("Saving embedding cache...")
         torch.save({"embeddings": embeddings, "q_cls": q_cls}, emb_cache_path)
+        print("Cache saved")
+
 
     # ======================================================================
     # 4) BUILD CLASS EMBEDDINGS ONLY FOR THE EMD SUBSET
