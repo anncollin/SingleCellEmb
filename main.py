@@ -131,7 +131,7 @@ def main():
 
         if do_train:
             print("Starting TRAIN phase...")
-            #run_dino_experiment(cfg)
+            run_dino_experiment(cfg)
             print("Starting EVAL phase on CALLIBRATION SUBSET...")
             evaluate_dino_experiment(cfg, use_callibration=True)
 

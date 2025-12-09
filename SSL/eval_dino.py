@@ -297,7 +297,6 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
             Z = compute_embeddings_for_drug_folder(
                 student, folder, device=device, batch_size=128
             )
-            print(f"  → got {Z.shape[0]} embeddings")
             all_embeddings.append(Z)
             q_cls.extend([global_idx] * Z.shape[0])
 
