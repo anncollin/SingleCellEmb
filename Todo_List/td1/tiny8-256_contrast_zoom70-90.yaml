@@ -1,4 +1,4 @@
-experiment_name: "tiny8-256_contrastI_zoom70-90"
+experiment_name: "tiny8-256_contrast_zoom70-90"
 
 # Dataset
 image_size: 96
