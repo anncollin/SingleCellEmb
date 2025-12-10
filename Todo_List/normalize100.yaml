@@ -40,10 +40,10 @@ augment:
 
   rotation_degrees: [-180, 180]      
 
-  blur_global_p: 0.5
+  blur_global_p: 0.0
   blur_global_sigma: [1.0, 5.0]
 
-  blur_local_p: 0.2
+  blur_local_p: 0.0
   blur_local_sigma: [0.1, 0.5]
 
   noise_global_p: 0.0

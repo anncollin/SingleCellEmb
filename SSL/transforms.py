@@ -59,9 +59,37 @@ class CenteredRandomResizedCrop(nn.Module):
         # resize to DINO output size
         x = K.Resize((self.out, self.out), align_corners=False)(x)
         return x
+    
 
+class PerImageChannelMinMaxNorm(nn.Module):
+    """
+    Normalize each channel of each image independently to [-1, 1]
+    using per-image per-channel min/max,
+    with probability p.
+    """
+    def __init__(self, p: float = 1.0, eps: float = 1e-6):
+        super().__init__()
+        self.p = float(p)
+        self.eps = eps
 
+    def forward(self, x):
+        # probability check
+        if self.p < 1.0:
+            if torch.rand(1, device=x.device) > self.p:
+                return x
 
+        # Compute per-image per-channel min and max → shape (B, C, 1, 1)
+        x_min = x.amin(dim=(2, 3), keepdim=True)
+        x_max = x.amax(dim=(2, 3), keepdim=True)
+
+        # Avoid division by zero
+        rng = (x_max - x_min).clamp(min=self.eps)
+
+        # Normalize to [0, 1]
+        x_norm = (x - x_min) / rng
+
+        # Rescale to [-1, 1]
+        return (x_norm * 2.0) - 1.0
 
 
 #######################################################################################################
@@ -104,6 +132,8 @@ class KorniaMultiCropTransform(nn.Module):
 
         brightness_egfp_p     = float(aug.get("brightness_egfp_p", 0.0))
         brightness_egfp_range = tuple(aug.get("brightness_egfp_range", [1.0, 1.0]))
+
+        normalize_p = float(aug.get("normalize_p", 0.0))
 
         rotation_degrees = aug.get("rotation_degrees", None)
         if rotation_degrees is not None:
@@ -234,6 +264,7 @@ class KorniaMultiCropTransform(nn.Module):
         # 6. GLOBAL PIPELINE
         # -----------------------
         self.global_transform = nn.Sequential(
+            PerImageChannelMinMaxNorm(normalize_p),
             rotation,
             CenteredRandomResizedCrop(image_size, global_crops_scale),
             K.RandomHorizontalFlip(p=0.5),
@@ -249,6 +280,7 @@ class KorniaMultiCropTransform(nn.Module):
         # 7. LOCAL PIPELINE
         # -----------------------
         self.local_transform = nn.Sequential(
+            PerImageChannelMinMaxNorm(normalize_p),
             rotation,
             K.RandomResizedCrop(
                 size=(local_size, local_size),
