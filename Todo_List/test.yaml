@@ -35,15 +35,21 @@ augment:
   brightness_egfp_p: 0.0
   brightness_egfp_range: [0.5, 2.0]
 
+  brightness_shift_dapi_p: 0.5
+  brightness_shift_dapi_range: [-0.1, 0.1]
+
+  brightness_shift_egfp_p: 0.0
+  brightness_shift_egfp_range: [-0.1, 0.1]
+
   contrast_p: 0.0
   contrast_range: [0.9, 1.1]
 
   rotation_degrees: [-180, 180]      
 
-  blur_global_p: 0.5
+  blur_global_p: 0.0
   blur_global_sigma: [1.0, 5.0]
 
-  blur_local_p: 0.2
+  blur_local_p: 0.0
   blur_local_sigma: [0.1, 0.5]
 
   noise_global_p: 0.0
@@ -51,8 +57,6 @@ augment:
 
   noise_local_p: 0.0
   noise_local_std: [0.001, 0.003]
-
-  normalize_p: 1.0
 
 # EMA
 base_momentum: 0.996
