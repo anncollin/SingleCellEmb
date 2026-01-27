@@ -17,11 +17,12 @@ sys.path.append(CURRENT_DIR)
 #######################################################################################################
 class CellDataset(Dataset):
 
-    def __init__(self, root_dir, transform=None, synthetic_length=100_000):
+    def __init__(self, root_dir, transform=None, synthetic_length=100_000, in_chans=2):
         super().__init__()
         self.root_dir = root_dir
         self.transform = transform
         self.synthetic_length = synthetic_length
+        self.in_chans = in_chans
 
         # find all .npy files
         self.npy_files = []
@@ -45,6 +46,9 @@ class CellDataset(Dataset):
 
             try:
                 arr = np.load(path)
+                if self.in_chans == 1:
+                    arr = arr[0:1]
+
                 tensor = torch.from_numpy(arr).float()
                 return tensor
 

@@ -14,7 +14,7 @@ from SSL.utils import visualize_multicrop
 from SSL.transforms import KorniaMultiCropTransform
 from SSL.model import create_vit_small_backbone, DINOHead, DINOStudent
 from SSL.loss import DINOLoss
-from SSL.utils import update_teacher, ensure_dir, save_checkpoint
+from SSL.utils import update_teacher, ensure_dir, save_checkpoint, compute_expert_annotation_metric
 
 
 #######################################################################################################
@@ -80,6 +80,15 @@ def compute_all_metrics(student, teacher, dataloader, gpu_transform, device="cud
     out_dim = proto_indices.max().item() + 1
     counts = torch.bincount(proto_indices, minlength=out_dim).float()
 
+    expert_score = compute_expert_annotation_metric(
+        student,
+        data_root=dataloader.dataset.root_dir,
+        annotations_csv="/home/anncollin/Desktop/Nucleoles/SingleCellEmb/SSL/annotations.csv",
+        in_channels=student.backbone.patch_embed.proj.in_channels,
+        device=device,
+    )
+
+
     return {
         "student_entropy": float(np.mean(student_ent)),
         "teacher_entropy": float(np.mean(teacher_ent)),
@@ -88,6 +97,7 @@ def compute_all_metrics(student, teacher, dataloader, gpu_transform, device="cud
         "student_teacher_cosine": float(np.mean(cosine_sims)),
         "active_dimension_fraction": float((counts > 0).sum().item() / counts.numel()),
         "max_dimension_frequency": float(counts.max().item() / proto_indices.numel()),
+        "expert_annotations": expert_score,
     }
 
 
@@ -196,7 +206,7 @@ def run_dino_experiment(cfg: Dict):
         cfg=cfg
     ).to(device)
 
-    dataset = CellDataset(root_dir=data_root)
+    dataset = CellDataset(root_dir=data_root, in_chans=in_chans)
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -207,7 +217,7 @@ def run_dino_experiment(cfg: Dict):
     )
 
     # ------------------------------ visualize DA ------------------------------
-    #visualize_multicrop(dataset, gpu_transform, device)
+    #visualize_multicrop(dataset, gpu_transform, device, channel_display="egfp")
     # --------------------------------------------------------------------------
 
     backbone_student = create_vit_small_backbone(

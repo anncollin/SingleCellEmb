@@ -1,50 +1,53 @@
-experiment_name: "tiny16-128_ultraLightDA"
+experiment_name: "EGFP-small8-256_zoom70-90"
 
 # Dataset
 image_size: 96
-in_channels: 2
+in_channels: 1
 
 # ViT / DINO settings
-patch_size: 16
-out_dim: 128
-architecture: tiny  
+patch_size: 8
+out_dim: 256
+architecture: small
 
 # Training
-batch_size: 128
+batch_size: 64
 epochs: 250
 learning_rate: 1e-4
 weight_decay: 0.05
 num_workers: 0
 
 # DINO Multi-crop
-global_crops_scale: [0.5, 0.9]
+global_crops_scale: [0.7, 0.9]
 local_crops_scale: [0.1, 0.4]
-local_crops_number: 6
+local_crops_number: 8
 
 # Augmentation settings
 augment:
-  elastic_p: 0.1
+  elastic_p: 0.0
   elastic_alpha_range: [4.0, 8.0] 
   elastic_sigma_range: [30.0, 40.0] 
 
-  solarization_p: 0.1
+  solarization_p: 0.0
 
   brightness_dapi_p: 0.0
-  brightness_dapi_range: [0.5, 3.0]
+  brightness_dapi_range: [0.0, 0.0]
 
   brightness_egfp_p: 0.0
-  brightness_egfp_range: [0.5, 2.0]
+  brightness_egfp_range: [0.7, 2.0]
 
-  contrast_p: 0.2
-  contrast_range: [0.9, 1.1]
+  contrast_p: 0.0
+  contrast_range: [0.5, 1.9]
+
+  sharpness_p : 0.0
+  sharpness_factor : 25.0
 
   rotation_degrees: [-180, 180]      
 
   blur_global_p: 0.0
-  blur_global_sigma: [1.0, 5.0]
+  blur_global_sigma: [10, 20.0]
 
   blur_local_p: 0.0
-  blur_local_sigma: [0.1, 0.5]
+  blur_local_sigma: [0.5, 3.0]
 
   noise_global_p: 0.0
   noise_global_std: [0.001, 0.003]
