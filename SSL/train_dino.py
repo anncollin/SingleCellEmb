@@ -83,7 +83,7 @@ def compute_all_metrics(student, teacher, dataloader, gpu_transform, device="cud
     expert_score = compute_expert_annotation_metric(
         student,
         data_root=dataloader.dataset.root_dir,
-        annotations_csv="./annotations.csv",
+        annotations_csv="./SSL/annotations.csv",
         in_channels=student.backbone.patch_embed.proj.in_channels,
         device=device,
     )
