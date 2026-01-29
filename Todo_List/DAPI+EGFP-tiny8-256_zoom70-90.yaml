@@ -1,4 +1,4 @@
-experiment_name: "tiny8-256_brightDAPI+EGFP_zoom70-90"
+experiment_name: "DAPI+EGFP-tiny8-256_zoom70-90"
 
 # Dataset
 image_size: 96
