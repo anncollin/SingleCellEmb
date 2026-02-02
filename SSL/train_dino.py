@@ -84,7 +84,7 @@ def compute_all_metrics(student, teacher, dataloader, gpu_transform, device="cud
         student,
         data_root=dataloader.dataset.root_dir,
         annotations_csv="./SSL/annotations.csv",
-        in_channels=student.backbone.patch_embed.proj.in_channels,
+        in_channels=dataloader.dataset.in_channels,
         device=device,
     )
 

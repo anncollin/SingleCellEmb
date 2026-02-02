@@ -12,15 +12,20 @@ from torch.utils.data import Dataset, DataLoader
 #######################################################################################################
 
 class PopulationDataset(Dataset):
-    """
-    Dataset loading all .npy cells from a population folder.
-    Applies the same channel selection as training.
-    """
 
-    def __init__(self, data_root: str, population_zip_path: str, in_channels: int):
+    def __init__(self, data_root: str, population_zip_path: str, in_channels: str):
         population_path = population_zip_path.replace(".zip", "")
         self.population_dir = os.path.join(data_root, population_path)
-        self.in_channels = int(in_channels)
+
+        self.in_channels = in_channels.lower()
+        self.channel_map = {
+            "egfp": [0],
+            "dapi": [1],
+            "both": [0, 1],
+        }
+
+        if self.in_channels not in self.channel_map:
+            raise ValueError(f"Invalid in_channels={in_channels}")
 
         if not os.path.isdir(self.population_dir):
             self.npy_files = []
@@ -38,14 +43,8 @@ class PopulationDataset(Dataset):
 
     def __getitem__(self, idx):
         arr = np.load(self.npy_files[idx])  # (C, H, W)
-
-        if self.in_channels == 1:
-            arr = arr[0:1]  # EGFP only
-        elif self.in_channels == 2:
-            pass
-        else:
-            raise ValueError(f"Unsupported in_channels={self.in_channels}")
-
+        chans = self.channel_map[self.in_channels]
+        arr = arr[chans]
         return torch.from_numpy(arr).float()
 
 
@@ -54,7 +53,7 @@ def compute_population_embedding(
     model,
     data_root: str,
     population_zip_path: str,
-    in_channels: int,
+    in_channels: str,
     device="cuda",
     batch_size=128,
 ):
@@ -95,7 +94,7 @@ def compute_expert_annotation_metric(
     student,
     data_root: str,
     annotations_csv: str,
-    in_channels: int,
+    in_channels: str,
     device="cuda",
 ):
     """
@@ -117,9 +116,6 @@ def compute_expert_annotation_metric(
         q2 = str(row["which"]).strip() if not pd.isna(row["which"]) else None
         q3 = str(row["both"]).strip() if not pd.isna(row["both"]) else None
 
-        # ----------------------------------------------------------
-        # Case selection (ONLY 1, 2, 3)
-        # ----------------------------------------------------------
         if q1 == "yes" and q2 == "both" and q3 == "equal":
             case = 1
         elif q1 == "yes" and q2 == "B":
@@ -129,9 +125,6 @@ def compute_expert_annotation_metric(
         else:
             continue
 
-        # ----------------------------------------------------------
-        # Population embeddings
-        # ----------------------------------------------------------
         embA = compute_population_embedding(
             student, data_root, A, in_channels, device
         )
@@ -149,14 +142,11 @@ def compute_expert_annotation_metric(
         dAC = torch.norm(embA - embC).item()
         dBC = torch.norm(embB - embC).item()
 
-        # ----------------------------------------------------------
-        # Validity rules
-        # ----------------------------------------------------------
         if case == 1:
             is_valid = (dBC < dAB) and (dBC < dAC)
         elif case == 2:
             is_valid = (dAC < dAB) and (dAC < dBC)
-        else:  # case == 3
+        else:
             is_valid = (dAB < dAC) and (dAB < dBC)
 
         total += 1
@@ -167,6 +157,7 @@ def compute_expert_annotation_metric(
         return 0.0
 
     return 100.0 * valid / total
+
 
 #######################################################################################################
 # EMA UPDATE FOR TEACHER PARAMETERS
