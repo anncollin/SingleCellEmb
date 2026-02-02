@@ -62,8 +62,6 @@ class CellDataset(Dataset):
                 chans = self.channel_map[self.in_channels]
                 arr = arr[chans]     # (C, H, W)
 
-                print(arr.shape)
-
                 tensor = torch.from_numpy(arr).float()
 
                 if self.transform is not None:
