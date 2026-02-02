@@ -2,7 +2,7 @@ experiment_name: "DAPI+EGFP-tiny8-256_zoom70-90"
 
 # Dataset
 image_size: 96
-in_channels: 2
+in_channels: both
 
 # ViT / DINO settings
 patch_size: 8

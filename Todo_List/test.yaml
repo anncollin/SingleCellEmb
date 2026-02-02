@@ -2,7 +2,7 @@ experiment_name: "test"
 
 # Dataset
 image_size: 96
-in_channels: 1
+in_channels : both
 
 # ViT / DINO settings
 patch_size: 8

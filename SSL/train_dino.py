@@ -175,7 +175,14 @@ def run_dino_experiment(cfg: Dict):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     image_size   = int(cfg.get("image_size", 96))
-    in_chans     = int(cfg.get("in_channels", 2))
+    in_channels  = cfg.get("in_channels", "both").lower()
+    in_chans_map = {
+        "egfp": 1,
+        "dapi": 1,
+        "both": 2,
+    }
+    in_chans = in_chans_map[in_channels]
+
     patch_size   = int(cfg.get("patch_size", 8))
     out_dim      = int(cfg.get("out_dim", 768))
     architecture = str(cfg.get("architecture", "tiny"))
@@ -206,7 +213,7 @@ def run_dino_experiment(cfg: Dict):
         cfg=cfg
     ).to(device)
 
-    dataset = CellDataset(root_dir=data_root, in_chans=in_chans)
+    dataset = CellDataset(root_dir=data_root, in_channels=in_channels)
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -217,7 +224,7 @@ def run_dino_experiment(cfg: Dict):
     )
 
     # ------------------------------ visualize DA ------------------------------
-    #visualize_multicrop(dataset, gpu_transform, device, channel_display="egfp")
+    visualize_multicrop(dataset, gpu_transform, device, channel_display=in_channels)
     # --------------------------------------------------------------------------
 
     backbone_student = create_vit_small_backbone(

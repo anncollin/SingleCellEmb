@@ -234,29 +234,40 @@ def save_checkpoint(checkpoint_path: str, state: Dict) -> None:
 # VISUALIZE 5 RANDOM IMAGES: 2 GLOBAL + N LOCAL CROPS EACH (GRID VIEW)
 #######################################################################################################
 @torch.no_grad()
-def visualize_multicrop(
-    dataset,
-    gpu_transform,
-    device="cuda",
-    channel_display="rgb",
-):
+def visualize_multicrop(dataset, gpu_transform, device="cuda", channel_display="both"):
     """
     Displays the original image + 2 global and N local crops
     for 5 random dataset images in a grid:
     5 rows x (1 + 2 + N) columns.
     """
+    
+    def make_view(x, mode):
+        x = np.clip(x, 0.0, 1.0)
 
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import random
+        if mode == "egfp":
+            rgb = np.zeros((x.shape[1], x.shape[2], 3), dtype=np.float32)
+            rgb[..., 1] = np.clip(x[0] * 3.0, 0.0, 1.0)
+            return rgb
+
+        if mode == "dapi":
+            rgb = np.zeros((x.shape[1], x.shape[2], 3), dtype=np.float32)
+            rgb[..., 2] = np.clip(x[0] * 3.0, 0.0, 1.0)
+            return rgb
+
+        if mode == "both":
+            rgb = np.zeros((x.shape[1], x.shape[2], 3), dtype=np.float32)
+            rgb[..., 1] = np.clip(x[0] * 3.0, 0.0, 1.0)  # EGFP
+            rgb[..., 2] = np.clip(x[1] * 3.0, 0.0, 1.0)  # DAPI
+            return rgb
+
+        raise ValueError("channel_display must be 'egfp', 'dapi', or 'both'")
 
     n_rows = 5
     sample_idxs = random.sample(range(len(dataset)), n_rows)
 
-    # Determine number of crops dynamically
     test_img = dataset[sample_idxs[0]].unsqueeze(0).to(device)
     test_crops = gpu_transform(test_img)
-    n_cols = 1 + len(test_crops)  # +1 for original image
+    n_cols = 1 + len(test_crops)
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3 * n_rows))
 
@@ -265,57 +276,21 @@ def visualize_multicrop(
         img = dataset[sample_idx].unsqueeze(0).to(device)
         crops = gpu_transform(img)
 
-        # ---- original image (column 0) ----
-        x0 = img[0].detach().cpu().float().numpy()  # (C, H, W)
+        x0 = img[0].detach().cpu().float().numpy()
+        view0 = make_view(x0, channel_display)
 
-        if channel_display == "rgb":
-            if x0.shape[0] == 2:
-                rgb = np.zeros((x0.shape[1], x0.shape[2], 3), dtype=np.float32)
-                rgb[..., 1] = np.clip(x0[0] * 3.0, 0.0, 1.0)
-                rgb[..., 2] = np.clip(x0[1] * 3.0, 0.0, 1.0)
-                view0 = rgb
-            else:
-                view0 = x0.transpose(1, 2, 0)
-        elif channel_display == "egfp":
-            view0 = x0[0]
-        elif channel_display == "dapi":
-            view0 = x0[1]
-        else:
-            raise ValueError("channel_display must be 'rgb', 'egfp', or 'dapi'")
-
-        axes[row, 0].imshow(
-            view0,
-            cmap="gray" if channel_display != "rgb" else None
-        )
+        axes[row, 0].imshow(view0)
         axes[row, 0].axis("off")
 
         if row == 0:
             axes[row, 0].set_title("Original")
 
-        # ---- crops (columns 1..end) ----
         for col, crop in enumerate(crops, start=1):
 
-            x = crop[0].detach().cpu().float().numpy()  # (C, H, W)
+            x = crop[0].detach().cpu().float().numpy()
+            view = make_view(x, channel_display)
 
-            if channel_display == "rgb":
-                if x.shape[0] == 2:
-                    rgb = np.zeros((x.shape[1], x.shape[2], 3), dtype=np.float32)
-                    rgb[..., 1] = np.clip(x[0] * 3.0, 0.0, 1.0)
-                    rgb[..., 2] = np.clip(x[1] * 3.0, 0.0, 1.0)
-                    view = rgb
-                else:
-                    view = x.transpose(1, 2, 0)
-            elif channel_display == "egfp":
-                view = x[0]
-            elif channel_display == "dapi":
-                view = x[1]
-            else:
-                raise ValueError("channel_display must be 'rgb', 'egfp', or 'dapi'")
-
-            axes[row, col].imshow(
-                view,
-                cmap="gray" if channel_display != "rgb" else None
-            )
+            axes[row, col].imshow(view)
             axes[row, col].axis("off")
 
             if row == 0:
@@ -328,5 +303,3 @@ def visualize_multicrop(
 
     plt.tight_layout()
     plt.show()
-
-

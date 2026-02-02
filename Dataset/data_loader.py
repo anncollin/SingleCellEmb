@@ -13,18 +13,27 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(CURRENT_DIR)
 
 #######################################################################################################
-# DATASET FOR MyDB_npy  (parallel to CellDataset 
+# DATASET FOR MyDB_npy  
 #######################################################################################################
 class CellDataset(Dataset):
 
-    def __init__(self, root_dir, transform=None, synthetic_length=100_000, in_chans=2):
+    def __init__(self, root_dir, transform=None, synthetic_length=100_000, in_channels="both"):
         super().__init__()
         self.root_dir = root_dir
         self.transform = transform
         self.synthetic_length = synthetic_length
-        self.in_chans = in_chans
+        self.in_channels = in_channels.lower()
 
-        # find all .npy files
+        assert self.in_channels in {"egfp", "dapi", "both"}, \
+            f"Invalid in_channels={in_channels}"
+
+        # channel index map (EXPLICIT)
+        self.channel_map = {
+            "egfp": [0],
+            "dapi": [1],
+            "both": [0, 1],
+        }
+
         self.npy_files = []
         for r, d, files in os.walk(root_dir):
             for f in files:
@@ -32,28 +41,37 @@ class CellDataset(Dataset):
                     self.npy_files.append(os.path.join(r, f))
 
         if len(self.npy_files) == 0:
-            raise RuntimeError(f"[NpyCellDataset] No .npy files found in {root_dir}.")
+            raise RuntimeError(f"[CellDataset] No .npy files found in {root_dir}.")
 
-        print(f"[NpyCellDataset] Found {len(self.npy_files)} npy files under {root_dir}.")
+        print(
+            f"[CellDataset] Found {len(self.npy_files)} npy files | "
+            f"in_channels={self.in_channels}"
+        )
 
     def __len__(self):
         return self.synthetic_length
 
     def __getitem__(self, idx):
 
-        while True:  # keep trying until a valid file is found
+        while True:
             path = random.choice(self.npy_files)
 
             try:
-                arr = np.load(path)
-                if self.in_chans == 1:
-                    arr = arr[0:1]
+                arr = np.load(path)  # (2, H, W)
+
+                chans = self.channel_map[self.in_channels]
+                arr = arr[chans]     # (C, H, W)
+
+                print(arr.shape)
 
                 tensor = torch.from_numpy(arr).float()
+
+                if self.transform is not None:
+                    tensor = self.transform(tensor)
+
                 return tensor
 
             except Exception:
-                # silently drop broken file
                 if path in self.npy_files:
                     self.npy_files.remove(path)
 
