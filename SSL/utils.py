@@ -148,7 +148,7 @@ def compute_expert_annotation_metric(
         if is_valid:
             valid += 1
 
-        print(total, is_valid, 100.0 * valid / total)
+        #print(total, is_valid, 100.0 * valid / total)
 
     if total == 0:
         return 0.0
