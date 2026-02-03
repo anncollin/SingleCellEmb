@@ -1,4 +1,4 @@
-experiment_name: "test"
+experiment_name: "DAPI+EGFP-tiny8-256_LR-05_brightStrong"
 
 # Dataset
 image_size: 96
@@ -17,7 +17,7 @@ weight_decay: 0.05
 num_workers: 0
 
 # DINO Multi-crop
-global_crops_scale: [0.7, 0.9]
+global_crops_scale: [0.6, 0.9]
 local_crops_scale: [0.1, 0.4]
 local_crops_number: 8
 
@@ -29,11 +29,11 @@ augment:
 
   solarization_p: 0.0
 
-  brightness_dapi_p: 0.5
-  brightness_dapi_range: [0.5, 2.0]
+  brightness_dapi_p: 0.8
+  brightness_dapi_range: [0.2, 4.0]
 
-  brightness_egfp_p: 0.3
-  brightness_egfp_range: [0.5, 2.0]
+  brightness_egfp_p: 0.5
+  brightness_egfp_range: [0.3, 4.0]
 
   contrast_p: 0.0
   contrast_range: [0.5, 1.9]
@@ -58,6 +58,4 @@ augment:
 # EMA
 base_momentum: 0.996
 max_momentum: 1.0
-
-
 

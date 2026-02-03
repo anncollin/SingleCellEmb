@@ -1,8 +1,8 @@
-experiment_name: "DAPI+EGFP-tiny8-256_zoom70-90"
+experiment_name: "EGFP-tiny8-256_lr-05"
 
 # Dataset
 image_size: 96
-in_channels: both
+in_channels: egfp
 
 # ViT / DINO settings
 patch_size: 8
@@ -12,12 +12,12 @@ architecture: tiny
 # Training
 batch_size: 64
 epochs: 250
-learning_rate: 1e-4
+learning_rate: 1e-5
 weight_decay: 0.05
 num_workers: 0
 
 # DINO Multi-crop
-global_crops_scale: [0.7, 0.9]
+global_crops_scale: [0.6, 0.9]
 local_crops_scale: [0.1, 0.4]
 local_crops_number: 8
 

@@ -14,10 +14,13 @@ class RandomChannelBrightness(nn.Module):
         self.p    = float(p)
         self.low  = float(factor_range[0])
         self.high = float(factor_range[1])
-
+        
     def forward(self, x):
         # x: (B, C, H, W)
         if self.p <= 0.0:
+            return x
+
+        if self.channel_idx >= x.shape[1]:
             return x
 
         if torch.rand(1, device=x.device) > self.p:
@@ -28,6 +31,7 @@ class RandomChannelBrightness(nn.Module):
         x = x.clone()
         x[:, self.channel_idx] = (x[:, self.channel_idx] * factor).clamp(0.0, 1.0)
         return x
+
     
 class CenteredRandomResizedCrop(nn.Module):
     def __init__(self, out_size, scale):

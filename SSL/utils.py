@@ -14,7 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 class PopulationDataset(Dataset):
 
     def __init__(self, data_root: str, population_zip_path: str, in_channels: str):
-        population_path = population_zip_path.replace(".zip", "")
+        population_path     = population_zip_path.replace(".zip", "")
         self.population_dir = os.path.join(data_root, population_path)
 
         self.in_channels = in_channels.lower()
@@ -42,9 +42,9 @@ class PopulationDataset(Dataset):
         return len(self.npy_files)
 
     def __getitem__(self, idx):
-        arr = np.load(self.npy_files[idx])  # (C, H, W)
+        arr   = np.load(self.npy_files[idx])  # (C, H, W)
         chans = self.channel_map[self.in_channels]
-        arr = arr[chans]
+        arr   = arr[chans]
         return torch.from_numpy(arr).float()
 
 
@@ -55,7 +55,7 @@ def compute_population_embedding(
     population_zip_path: str,
     in_channels: str,
     device="cuda",
-    batch_size=128,
+    batch_size=2048,
 ):
     """
     Population embedding = mean of all cell embeddings.
@@ -69,12 +69,12 @@ def compute_population_embedding(
 
     if len(dataset) == 0:
         return None
-
+    
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=4,
         pin_memory=True,
     )
 
@@ -86,6 +86,7 @@ def compute_population_embedding(
         feats.append(h.cpu())
 
     feats = torch.cat(feats, dim=0)
+    #print("feats.shape =", feats.shape)
     return feats.mean(dim=0)
 
 
@@ -125,15 +126,9 @@ def compute_expert_annotation_metric(
         else:
             continue
 
-        embA = compute_population_embedding(
-            student, data_root, A, in_channels, device
-        )
-        embB = compute_population_embedding(
-            student, data_root, B, in_channels, device
-        )
-        embC = compute_population_embedding(
-            student, data_root, C, in_channels, device
-        )
+        embA = compute_population_embedding(student, data_root, A, in_channels, device)
+        embB = compute_population_embedding(student, data_root, B, in_channels, device)
+        embC = compute_population_embedding(student, data_root, C, in_channels, device)
 
         if embA is None or embB is None or embC is None:
             continue
@@ -152,6 +147,8 @@ def compute_expert_annotation_metric(
         total += 1
         if is_valid:
             valid += 1
+
+        print(total, is_valid, 100.0 * valid / total)
 
     if total == 0:
         return 0.0

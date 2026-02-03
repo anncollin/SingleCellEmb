@@ -1,8 +1,8 @@
-experiment_name: "test"
+experiment_name: "EGFP-tiny8-256_LR-01"
 
 # Dataset
 image_size: 96
-in_channels: both
+in_channels: egfp
 
 # ViT / DINO settings
 patch_size: 8
@@ -13,11 +13,11 @@ architecture: tiny
 batch_size: 64
 epochs: 250
 learning_rate: 1e-4
-weight_decay: 0.05
+weight_decay: 0.01
 num_workers: 0
 
 # DINO Multi-crop
-global_crops_scale: [0.7, 0.9]
+global_crops_scale: [0.6, 0.9]
 local_crops_scale: [0.1, 0.4]
 local_crops_number: 8
 
@@ -33,7 +33,7 @@ augment:
   brightness_dapi_range: [0.5, 2.0]
 
   brightness_egfp_p: 0.3
-  brightness_egfp_range: [0.5, 2.0]
+  brightness_egfp_range: [0.7, 2.0]
 
   contrast_p: 0.0
   contrast_range: [0.5, 1.9]
@@ -58,6 +58,4 @@ augment:
 # EMA
 base_momentum: 0.996
 max_momentum: 1.0
-
-
 

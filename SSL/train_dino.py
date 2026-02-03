@@ -224,7 +224,7 @@ def run_dino_experiment(cfg: Dict):
     )
 
     # ------------------------------ visualize DA ------------------------------
-    #visualize_multicrop(dataset, gpu_transform, device, channel_display=in_channels)
+    visualize_multicrop(dataset, gpu_transform, device, channel_display=in_channels)
     # --------------------------------------------------------------------------
 
     backbone_student = create_vit_small_backbone(

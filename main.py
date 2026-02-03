@@ -8,6 +8,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="torch.nn.utils
 
 from SSL.train_dino import run_dino_experiment
 from SSL.eval_dino import evaluate_dino_experiment
+from SSL.eval_expert import evaluate_expert
 
 
 #######################################################################################################
@@ -136,8 +137,10 @@ def main():
             evaluate_dino_experiment(cfg, use_callibration=True)
 
         if do_eval: 
-            print("Starting EVAL phase on FULL SUBSET...")
-            evaluate_dino_experiment(cfg, use_callibration=False)
+            print("Starting EXPERT EVAL phase...")
+            evaluate_expert(cfg=cfg, annotations_csv="./SSL/annotations.csv", in_channels=cfg.get("in_channels", "both"))
+            #print("Starting EVAL phase on FULL SUBSET...")
+            #evaluate_dino_experiment(cfg, use_callibration=False)
 
 
 if __name__ == "__main__":
