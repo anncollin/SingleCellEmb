@@ -249,6 +249,8 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     base_dir = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..")
     )
+    if "/Todo_List" in base_dir:
+        base_dir = base_dir.replace("/Todo_List", "")
 
     results_root = ensure_dir(f"{base_dir}/Results/{experiment_name}")
 
