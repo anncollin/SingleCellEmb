@@ -133,14 +133,14 @@ def main():
         if do_train:
             print("Starting TRAIN phase...")
             run_dino_experiment(cfg)
-            print("Starting EVAL phase on CALLIBRATION SUBSET...")
-            evaluate_dino_experiment(cfg, use_callibration=True)
+            #print("Starting EVAL phase on CALLIBRATION SUBSET...")
+            #evaluate_dino_experiment(cfg, use_callibration=True)
 
         if do_eval: 
             print("Starting EXPERT EVAL phase...")
             evaluate_expert(cfg=cfg, annotations_csv="./SSL/annotations.csv", in_channels=cfg.get("in_channels", "both"))
-            #print("Starting EVAL phase on FULL SUBSET...")
-            #evaluate_dino_experiment(cfg, use_callibration=False)
+            print("Starting EVAL phase on FULL SUBSET...")
+            evaluate_dino_experiment(cfg, use_callibration=False)
 
 
 if __name__ == "__main__":

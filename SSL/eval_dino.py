@@ -30,9 +30,19 @@ def hms(seconds: float) -> str:
 #######################################################################################################
 def load_trained_student(checkpoint_path: str, cfg: Dict, device: str = "cuda"):
 
-    patch_size   = int(cfg.get("patch_size", 8))
-    in_chans     = int(cfg.get("in_channels", 2))
-    out_dim      = int(cfg.get("out_dim", 8192))
+    patch_size = int(cfg.get("patch_size", 8))
+
+    in_channels = str(cfg.get("in_channels", "both")).lower()
+    in_chans_map = {
+        "egfp": 1,
+        "dapi": 1,
+        "both": 2,
+    }
+    if in_channels not in in_chans_map:
+        raise ValueError(f"Invalid in_channels={in_channels}")
+    in_chans = in_chans_map[in_channels]
+
+    out_dim = int(cfg.get("out_dim", 8192))
     architecture = str(cfg.get("architecture", "tiny"))
 
     backbone = create_vit_small_backbone(
@@ -75,7 +85,7 @@ def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> str:
         return None
 
     plate = matches.iloc[0, 0].strip()
-    well  = matches.iloc[0, 1].strip()
+    well = matches.iloc[0, 1].strip()
 
     folder = os.path.join(cfg["data_root"], plate, well)
     return folder if os.path.isdir(folder) else None
@@ -85,12 +95,23 @@ def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> str:
 # EMBEDDING COMPUTATION
 #######################################################################################################
 @torch.no_grad()
-def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_size=128):
+def compute_embeddings_for_drug_folder(student, folder, in_channels: str, device="cuda", batch_size=128):
+
+    in_channels = str(in_channels).lower()
+    channel_map = {
+        "egfp": [0],
+        "dapi": [1],
+        "both": [0, 1],
+    }
+    if in_channels not in channel_map:
+        raise ValueError(f"Invalid in_channels={in_channels}")
+
+    chans = channel_map[in_channels]
 
     files = sorted(f for f in os.listdir(folder) if f.endswith(".npy"))
 
     if len(files) == 0:
-        return torch.empty(0, 1)
+        return torch.empty(0, student.backbone.num_features)
 
     out = []
 
@@ -102,17 +123,16 @@ def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_siz
         for f in batch_files:
             path = os.path.join(folder, f)
             try:
-                arr = np.load(path).astype(np.float32)
+                arr = np.load(path).astype(np.float32)  # (2, H, W)
+                arr = arr[chans]                       # (C, H, W)
                 batch_list.append(arr)
             except Exception:
-                # silently skip broken file
                 continue
 
-        # If the whole batch was broken, just skip it
         if len(batch_list) == 0:
             continue
 
-        batch = np.stack(batch_list, axis=0)
+        batch = np.stack(batch_list, axis=0)  # (B, C, H, W)
         batch = torch.from_numpy(batch).to(device, non_blocking=True)
 
         z = student.backbone(batch)
@@ -120,7 +140,6 @@ def compute_embeddings_for_drug_folder(student, folder, device="cuda", batch_siz
 
         del batch
 
-    # If EVERYTHING was broken in this folder
     if len(out) == 0:
         return torch.empty(0, student.backbone.num_features)
 
@@ -159,7 +178,6 @@ def hybrid_worker(proc_id,
                   n_threads,
                   global_counter):
 
-    # make sure workers do not touch CUDA
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
     def compute_row(cls1: int) -> np.ndarray:
@@ -229,14 +247,17 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     experiment_name = str(cfg.get("experiment_name", "DINO_experiment"))
-    base_dir        = os.getcwd()[:-10] if os.getcwd().endswith("/Todo_List") else os.getcwd()
-    results_root    = ensure_dir(f"{base_dir}/Results/{experiment_name}")
+    base_dir = os.getcwd()[:-10] if os.getcwd().endswith("/Todo_List") else os.getcwd()
+    results_root = ensure_dir(f"{base_dir}/Results/{experiment_name}")
 
-    ckpt           = f"{base_dir}/Results/{experiment_name}/checkpoints/final_weights.pth"
+    ckpt = f"{base_dir}/Results/{experiment_name}/checkpoints/final_weights.pth"
     emb_cache_path = os.path.join(results_root, "cached_embeddings.pt")
 
-    student = load_trained_student(ckpt, cfg, device=device)
+    in_channels = str(cfg.get("in_channels", "both")).lower()
+    if in_channels not in {"egfp", "dapi", "both"}:
+        raise ValueError(f"Invalid in_channels={in_channels}")
 
+    student = load_trained_student(ckpt, cfg, device=device)
 
     # ======================================================================
     # 1) LOAD FOLDERS ONLY IF CACHE DOES NOT EXIST
@@ -245,11 +266,11 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     print(f"Embedding on FULL dataset: {len(all_drugs)} drugs")
 
     if os.path.isfile(emb_cache_path):
-        print("cached_embeddings.pt found → skipping folder detection")
+        print("cached_embeddings.pt found -> skipping folder detection")
         all_valid_drugs = all_drugs
         folder_list = []
     else:
-        print("cached_embeddings.pt not found → locating dataset folders")
+        print("cached_embeddings.pt not found -> locating dataset folders")
         all_valid_drugs = []
         folder_list = []
         for drug in all_drugs:
@@ -283,10 +304,10 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         print("Loading cached embeddings...")
         cache = torch.load(emb_cache_path, map_location="cpu")
         embeddings = cache["embeddings"]
-        q_cls      = cache["q_cls"]
+        q_cls = cache["q_cls"]
         print(f"Loaded: {embeddings.shape[0]} embeddings")
     else:
-        print("No cache found → computing embeddings")
+        print("No cache found -> computing embeddings")
         all_embeddings = []
         q_cls = []
         n_folders = len(folder_list)
@@ -295,7 +316,11 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         for global_idx, folder in enumerate(folder_list):
             print(f"[{global_idx+1}/{n_folders}] Computing embeddings for: {folder}")
             Z = compute_embeddings_for_drug_folder(
-                student, folder, device=device, batch_size=128
+                student,
+                folder,
+                in_channels=in_channels,
+                device=device,
+                batch_size=128
             )
             all_embeddings.append(Z)
             q_cls.extend([global_idx] * Z.shape[0])
@@ -306,7 +331,6 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         print("Saving embedding cache...")
         torch.save({"embeddings": embeddings, "q_cls": q_cls}, emb_cache_path)
         print("Cache saved")
-
 
     # ======================================================================
     # 4) BUILD CLASS EMBEDDINGS ONLY FOR THE EMD SUBSET
@@ -325,8 +349,8 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     # 5) RUN HYBRID EMD COMPUTATION
     # ======================================================================
     n_processes = 3
-    n_threads   = 3
-    normalize   = False
+    n_threads = 3
+    normalize = False
 
     print("\n================ HYBRID RUN (3 PROCESSES x 3 THREADS) ================\n")
 
@@ -422,7 +446,7 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     # ======================================================================
     for pid in range(n_processes):
         block_path = os.path.join(results_root, f"emd_block_proc{pid}.npy")
-        tmp_path   = block_path + ".tmp"
+        tmp_path = block_path + ".tmp"
         if os.path.isfile(block_path):
             os.remove(block_path)
         if os.path.isfile(tmp_path):
@@ -431,7 +455,7 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     t1 = time.perf_counter()
 
     total_time = t1 - t0
-    mean_time  = total_time / total_pairs if total_pairs > 0 else float("nan")
+    mean_time = total_time / total_pairs if total_pairs > 0 else float("nan")
 
     print("\n================ HYBRID RUN FINISHED ================\n")
     print(f"Processes: {n_processes} | Threads: {n_threads}")
@@ -439,4 +463,3 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     print(f"Mean time per pair: {mean_time:.6f} s")
 
     return total_time, mean_time, valid_drugs
-
