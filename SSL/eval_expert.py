@@ -52,10 +52,15 @@ def evaluate_expert(cfg: Dict, annotations_csv: str, in_channels: str):
     assert in_channels in {"both", "egfp", "dapi"}, \
         f"Invalid in_channels={in_channels}"
 
-    device          = "cuda" if torch.cuda.is_available() else "cpu"
-    base_dir        = os.getcwd()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    base_dir = os.getcwd().replace("/Todo_List", "")
     experiment_name = cfg["experiment_name"]
-    ckpt_path       = f"{base_dir}/Results/{experiment_name}/checkpoints/final_weights.pth"
+
+    ckpt_path = (
+        f"{base_dir}/Results/"
+        f"{experiment_name}/checkpoints/final_weights.pth"
+    )
 
     student = load_trained_student(ckpt_path, cfg, device=device)
 

@@ -25,6 +25,35 @@ def hms(seconds: float) -> str:
 
 
 #######################################################################################################
+# PROGRESS MONITOR
+#######################################################################################################
+def monitor_progress(global_counter, total_pairs, start_time, refresh=5):
+    last = -1
+    while True:
+        time.sleep(refresh)
+        with global_counter.get_lock():
+            done = global_counter.value
+
+        if done == last:
+            continue
+        last = done
+
+        elapsed = time.time() - start_time
+        rate = done / elapsed if elapsed > 0 else 0.0
+        remaining = (total_pairs - done) / rate if rate > 0 else float("inf")
+        pct = 100.0 * done / total_pairs
+
+        print(
+            f"[Hybrid] Distances computed: {done}/{total_pairs} "
+            f"({pct:.0f}%) | Elapsed: {hms(elapsed)} | Remaining: {hms(remaining)}",
+            flush=True,
+        )
+
+        if done >= total_pairs:
+            break
+
+
+#######################################################################################################
 # LOAD TRAINED STUDENT
 #######################################################################################################
 def load_trained_student(checkpoint_path: str, cfg: Dict, device: str = "cuda"):
@@ -344,6 +373,8 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
     total_pairs = int(D * (D - 1) / 2)
     global_counter = multiprocessing.Value("i", 0)
 
+    start_time = time.time()
+
     processes = []
     for pid in range(n_processes):
         p = multiprocessing.Process(
@@ -362,11 +393,11 @@ def evaluate_dino_experiment(cfg: Dict, use_callibration: bool):
         p.start()
         processes.append(p)
 
-    while any(p.is_alive() for p in processes):
-        time.sleep(5)
+    monitor_progress(global_counter, total_pairs, start_time)
 
     for p in processes:
         p.join()
+
 
     # ======================================================================
     # 6) MERGE BLOCKS
