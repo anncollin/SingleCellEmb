@@ -26,7 +26,6 @@ def hms(seconds: float) -> str:
     s = seconds % 60
     return f"{h}h {m}m {s:.1f}s"
 
-
 #######################################################################################################
 # COMPUTE BASIC METRICS
 #######################################################################################################
@@ -38,9 +37,6 @@ def compute_all_metrics(
     gpu_transform,
     device="cuda",
     num_batches=5,
-    epoch=None,
-    expert_interval=10,
-    compute_expert_last=True,
 ):
 
     student.eval()
@@ -90,7 +86,15 @@ def compute_all_metrics(
     out_dim = proto_indices.max().item() + 1
     counts = torch.bincount(proto_indices, minlength=out_dim).float()
 
-    metrics = {
+    expert_score = compute_expert_annotation_metric(
+        student,
+        data_root=dataloader.dataset.root_dir,
+        annotations_csv="./SSL/annotations.csv",
+        in_channels=dataloader.dataset.in_channels,
+        device=device,
+    )
+
+    return {
         "student_entropy": float(np.mean(student_ent)),
         "teacher_entropy": float(np.mean(teacher_ent)),
         "student_feature_variance": float(student_emb.var(dim=0).mean()),
@@ -98,25 +102,8 @@ def compute_all_metrics(
         "student_teacher_cosine": float(np.mean(cosine_sims)),
         "active_dimension_fraction": float((counts > 0).sum().item() / counts.numel()),
         "max_dimension_frequency": float(counts.max().item() / proto_indices.numel()),
+        "expert_annotations": expert_score,
     }
-
-    do_expert = False
-    if epoch is not None:
-        is_interval = ((epoch + 1) % expert_interval) == 0
-        is_last = compute_expert_last and ((epoch + 1) == getattr(dataloader, "_epochs", epoch + 1))  
-        do_expert = is_interval or is_last
-
-    if do_expert:
-        expert_score = compute_expert_annotation_metric(
-            student,
-            data_root=dataloader.dataset.root_dir,
-            annotations_csv="./SSL/annotations.csv",
-            in_channels=dataloader.dataset.in_channels,
-            device=device,
-        )
-        metrics["expert_annotations"] = expert_score
-
-    return metrics
 
 
 
@@ -314,16 +301,12 @@ def run_dino_experiment(cfg: Dict):
             max_momentum,
         )
 
-        do_expert = ((epoch + 1) % expert_interval == 0) or ((epoch + 1) == epochs)
-
         metrics = compute_all_metrics(
             student,
             teacher,
             dataloader,
             gpu_transform,
-            device,
-            num_batches=5,
-            compute_expert_last=do_expert,
+            device
         )
 
         if use_wandb:
@@ -331,4 +314,18 @@ def run_dino_experiment(cfg: Dict):
             wandb.log({"loss": avg_loss}, step=epoch)
 
         print(f"[{experiment_name}] Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f}")
+
+    save_checkpoint(
+        f"{checkpoints_dir}/final_weights.pth",
+        {
+            "epoch": epochs,
+            "student_state_dict": student.state_dict(),
+            "teacher_state_dict": teacher.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "config": cfg,
+        },
+    )
+
+    print(f"[Done] Saved final checkpoint.")
+    return student, teacher
 
