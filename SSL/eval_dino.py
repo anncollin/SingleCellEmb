@@ -17,11 +17,31 @@ from SSL.utils import ensure_dir
 #######################################################################################################
 # TIME FORMATTER (HOURS / MINUTES / SECONDS)
 #######################################################################################################
+import math
+
 def hms(seconds: float) -> str:
+    """
+    Safely format a duration (in seconds) into 'Hh Mm Ss.s' format.
+    Handles None, negative, NaN, and infinite values.
+    """
+
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return "0h 0m 0.0s"
+
+    if not math.isfinite(seconds):
+        return "0h 0m 0.0s"
+
+    if seconds < 0:
+        seconds = 0.0
+
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = seconds % 60
+
     return f"{h}h {m}m {s:.1f}s"
+
 
 
 #######################################################################################################
