@@ -323,7 +323,7 @@ def run_dino_experiment(cfg: Dict):
             gpu_transform,
             device,
             num_batches=5,
-            compute_expert=do_expert,
+            compute_expert_last=do_expert,
         )
 
         if use_wandb:
