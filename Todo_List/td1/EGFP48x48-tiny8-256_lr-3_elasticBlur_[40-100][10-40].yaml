@@ -1,4 +1,4 @@
-experiment_name: "EGFP-tiny8-256_lr-05"
+experiment_name: "EGFP48x48-tiny8-256_lr-3_elasticBlur_[40-100][10-40]"
 
 # Dataset
 image_size: 48
@@ -23,7 +23,7 @@ local_crops_number: 8
 
 # Augmentation settings
 augment:
-  elastic_p: 0.0
+  elastic_p: 0.5
   elastic_alpha_range: [5.0, 10.0] 
   elastic_sigma_range: [30.0, 50.0] 
 
@@ -43,7 +43,7 @@ augment:
 
   rotation_degrees: [-180, 180]      
 
-  blur_global_p: 0.0
+  blur_global_p: 0.5
   blur_global_sigma: [0.1, 1.0]
 
   blur_local_p: 0.0

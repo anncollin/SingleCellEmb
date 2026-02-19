@@ -1,0 +1,61 @@
+experiment_name: "EGFP48x48-tiny8-256_lr-4_elasticBlur_[70-100][10-40]"
+
+# Dataset
+image_size: 48
+in_channels: egfp
+
+# ViT / DINO settings
+patch_size: 8
+out_dim: 256
+architecture: tiny  
+
+# Training
+batch_size: 256
+epochs: 250
+learning_rate: 1e-4
+weight_decay: 0.1
+num_workers: 0
+
+# DINO Multi-crop
+global_crops_scale: [0.7, 1.0]
+local_crops_scale: [0.1, 0.4]
+local_crops_number: 8
+
+# Augmentation settings
+augment:
+  elastic_p: 0.5
+  elastic_alpha_range: [5.0, 10.0] 
+  elastic_sigma_range: [30.0, 50.0] 
+
+  solarization_p: 0.0
+
+  brightness_dapi_p: 0.0
+  brightness_dapi_range: [0.5, 2.0]
+
+  brightness_egfp_p: 0.0
+  brightness_egfp_range: [0.7, 2.0]
+
+  contrast_p: 0.0
+  contrast_range: [0.5, 1.9]
+
+  sharpness_p : 0.0
+  sharpness_factor : 5.0
+
+  rotation_degrees: [-180, 180]      
+
+  blur_global_p: 0.5
+  blur_global_sigma: [0.1, 1.0]
+
+  blur_local_p: 0.0
+  blur_local_sigma: [0.5, 3.0]
+
+  noise_global_p: 0.0
+  noise_global_std: [0.001, 0.005]
+
+  noise_local_p: 0.0
+  noise_local_std: [0.001, 0.003]
+
+# EMA
+base_momentum: 0.996
+max_momentum: 1.0
+

@@ -187,7 +187,7 @@ def run_dino_experiment(cfg: Dict):
 
     if use_wandb:
         wandb.finish()
-        wandb.init(project="DINO", name=cfg.get("experiment_name", "DINO_run"))
+        wandb.init(project="DINO_EGFPtest", name=cfg.get("experiment_name", "DINO_run"))
         wandb.config.update(cfg, allow_val_change=True)
 
     data_root = cfg["data_root"]
