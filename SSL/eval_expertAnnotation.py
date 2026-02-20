@@ -41,7 +41,7 @@ def evaluate_expertAnnotation(
             device=device,
         )
 
-        print("\n" + "-" * 60)
+        print("-" * 60)
         print(f"Expert annotation satisfaction (PROTOTYPE): {score:.2f}%")
         print("-" * 60)
         return score
@@ -113,7 +113,7 @@ def evaluate_expertAnnotation(
 
         score = 0.0 if total == 0 else 100.0 * valid / total
 
-        print("\n" + "-" * 60)
+        print("-" * 60)
         print(f"Expert annotation satisfaction (EMD): {score:.2f}%")
         print("-" * 60)
         return score

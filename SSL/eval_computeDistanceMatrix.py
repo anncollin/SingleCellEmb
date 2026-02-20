@@ -438,7 +438,6 @@ def evaluate_computeDistanceMatrix(
         q_cls_list = []
 
         for global_idx, folder in enumerate(folder_list):
-            print(folder)
             Z = compute_embeddings_for_drug_folder(
                 student,
                 folder,
