@@ -7,8 +7,8 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="torch.nn.utils.weight_norm")
 
 from SSL.train_dino import run_dino_experiment
-from SSL.eval_dino import evaluate_dino_experiment
-from SSL.eval_expert import evaluate_expert
+from SSL.eval_computeDistanceMatrix import evaluate_computeDistanceMatrix
+from SSL.eval_expertAnnotation import evaluate_expertAnnotation
 
 
 #######################################################################################################
@@ -131,16 +131,23 @@ def main():
             do_eval  = True
 
         if do_train:
-            print("Starting TRAIN phase...")
-            run_dino_experiment(cfg)
-            print("Starting EVAL phase on CALLIBRATION SUBSET...")
-            evaluate_dino_experiment(cfg, use_callibration=True)
+            #print("Starting TRAIN phase...")
+            #run_dino_experiment(cfg)
+
+            print("Starting EVAL : Compute distance matrix [all + emd]")
+            evaluate_computeDistanceMatrix(cfg, subset="all", metric="emd")
+
+            print("Starting EVAL : Compute distance matrix [all + prototype]")
+            evaluate_computeDistanceMatrix(cfg, subset="all", metric="prototype")
 
         if do_eval: 
-            #print("Starting EXPERT EVAL phase...")
-            #evaluate_expert(cfg=cfg, annotations_csv="./SSL/annotations.csv", in_channels=cfg.get("in_channels", "both"))
-            print("Starting EVAL phase on FULL SUBSET...")
-            evaluate_dino_experiment(cfg, use_callibration=False)
+            # callibration or all 
+            # prototype or emd 
+            print("Starting EVAL : Expert annotation [prototype]")
+            evaluate_expertAnnotation(cfg=cfg, metric="prototype")
+            print("Starting EVAL : Expert annotation [EMD]")
+            evaluate_expertAnnotation(cfg=cfg, metric="emd")
+
 
 
 if __name__ == "__main__":
