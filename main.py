@@ -131,8 +131,8 @@ def main():
             do_eval  = True
 
         if do_train:
-            #print("Starting TRAIN phase...")
-            #run_dino_experiment(cfg)
+            print("Starting TRAIN phase...")
+            run_dino_experiment(cfg)
 
             print("Starting EVAL : Compute distance matrix [all + emd]")
             evaluate_computeDistanceMatrix(cfg, subset="all", metric="emd")
