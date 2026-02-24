@@ -184,34 +184,36 @@ def train_one_epoch(
 
         student.eval()
 
-        dmso_emb = []
-        scr_emb  = []
+        dmso_paths = [p for p in dataset.npy_files if "Plate001/001001" in p and "siRNA_Plate001/001001" not in p]
+        scr_paths  = [p for p in dataset.npy_files if "siRNA_Plate001/001001" in p]
 
-        with torch.no_grad():
-
-            for path in dataset.npy_files:
-
-                if "Plate001/001001" not in path and \
-                   "siRNA_Plate001/001001" not in path:
+        def _embed_paths(paths, batch_size=256):
+            feats = []
+            for i in range(0, len(paths), batch_size):
+                batch = []
+                for p in paths[i:i + batch_size]:
+                    try:
+                        arr = np.load(p)
+                    except Exception:
+                        continue
+                    chans = dataset.channel_map[dataset.in_channels]
+                    arr = arr[chans]
+                    batch.append(torch.from_numpy(arr).float())
+                if len(batch) == 0:
                     continue
-
-                arr   = np.load(path)
-                chans = dataset.channel_map[dataset.in_channels]
-                arr   = arr[chans]
-
-                x = torch.from_numpy(arr).float().unsqueeze(0).to(device)
+                x = torch.stack(batch, dim=0).to(device, non_blocking=True)
                 x = gpu_transform(x)[0]
-
                 h = student.backbone(x)
+                feats.append(h)
+            if len(feats) == 0:
+                return None
+            return torch.cat(feats, dim=0).mean(0)
 
-                if "Plate001/001001" in path:
-                    dmso_emb.append(h)
-                else:
-                    scr_emb.append(h)
+        bs = int(cfg.get("proto_batch_size", 256))
+        with torch.no_grad():
+            proto_dmso = _embed_paths(dmso_paths, batch_size=bs)
+            proto_scr  = _embed_paths(scr_paths,  batch_size=bs)
 
-        if len(dmso_emb) > 0 and len(scr_emb) > 0:
-            proto_dmso = torch.cat(dmso_emb).mean(0)
-            proto_scr  = torch.cat(scr_emb).mean(0)
 
         student.train()
 
