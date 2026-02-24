@@ -42,7 +42,11 @@ class PopulationDataset(Dataset):
         return len(self.npy_files)
 
     def __getitem__(self, idx):
-        arr   = np.load(self.npy_files[idx])  # (C, H, W)
+        try:
+            arr = np.load(self.npy_files[idx])
+        except Exception:
+            return self.__getitem__((idx + 1) % len(self.npy_files))  # skip bad file
+
         chans = self.channel_map[self.in_channels]
         arr   = arr[chans]
         return torch.from_numpy(arr).float()
