@@ -50,6 +50,7 @@ class CellDataset(Dataset):
 
     def __len__(self):
         return self.synthetic_length
+    
 
     def __getitem__(self, idx):
 
@@ -57,10 +58,28 @@ class CellDataset(Dataset):
             path = random.choice(self.npy_files)
 
             try:
-                arr = np.load(path)  # (2, H, W)
+                arr = np.load(path, allow_pickle=False)
+
+                if not isinstance(arr, np.ndarray):
+                    raise ValueError("not a numpy array")
+
+                if arr.ndim != 3:
+                    raise ValueError(f"bad ndim={arr.ndim}")
 
                 chans = self.channel_map[self.in_channels]
-                arr = arr[chans]     # (C, H, W)
+                arr = arr[chans]
+
+                if arr.ndim != 3:
+                    raise ValueError(f"bad ndim after channel select={arr.ndim}")
+
+                c, h, w = arr.shape
+                if (h, w) != (96, 96):
+                    raise ValueError(f"bad spatial shape={(h, w)}")
+
+                if self.in_channels == "both" and c != 2:
+                    raise ValueError(f"expected 2 channels, got {c}")
+                if self.in_channels != "both" and c != 1:
+                    raise ValueError(f"expected 1 channel, got {c}")
 
                 tensor = torch.from_numpy(arr).float()
 
@@ -69,7 +88,8 @@ class CellDataset(Dataset):
 
                 return tensor
 
-            except Exception:
+            except Exception as e:
+                print(f"[CellDataset] Skipping {path} ({e})")
                 if path in self.npy_files:
                     self.npy_files.remove(path)
 
