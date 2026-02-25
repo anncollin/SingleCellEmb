@@ -1,4 +1,4 @@
-experiment_name: "forceDMSOtoZero_2"
+experiment_name: "joinDMSOandSCR_2"
 
 # Dataset
 image_size: 48
