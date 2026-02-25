@@ -31,25 +31,35 @@ def compute_dmso_scr_prototypes(student, dataset, gpu_transform, device):
         if "Plate001/001001" not in path and "siRNA_Plate001/001001" not in path:
             continue
 
-        arr = np.load(path)
-        chans = dataset.channel_map[dataset.in_channels]
-        arr = arr[chans]
+        try:
+            arr = np.load(path)
+        except Exception:
+            print(f"[Corrupted npy skipped] {path}")
+            continue
 
-        x = torch.from_numpy(arr).float().unsqueeze(0).to(device)
-        x = gpu_transform(x)[0]
+        try:
+            chans = dataset.channel_map[dataset.in_channels]
+            arr = arr[chans]
 
-        h = student.backbone(x)
+            x = torch.from_numpy(arr).float().unsqueeze(0).to(device, non_blocking=True)
+            x = gpu_transform(x)[0]
+
+            h = student.backbone(x)
+
+        except Exception:
+            print(f"[Failed processing] {path}")
+            continue
 
         if "Plate001/001001" in path:
-            dmso_emb.append(h)
+            dmso_emb.append(h.detach().cpu())
         else:
-            scr_emb.append(h)
+            scr_emb.append(h.detach().cpu())
 
     if len(dmso_emb) == 0 or len(scr_emb) == 0:
         return None, None
 
-    proto_dmso = torch.cat(dmso_emb).mean(0)
-    proto_scr  = torch.cat(scr_emb).mean(0)
+    proto_dmso = torch.cat(dmso_emb, dim=0).mean(0).to(device)
+    proto_scr  = torch.cat(scr_emb,  dim=0).mean(0).to(device)
 
     return proto_dmso, proto_scr
 
@@ -442,6 +452,8 @@ def run_dino_experiment(cfg: Dict):
             wandb.log({"loss": avg_loss}, step=epoch)
 
         print(f"[{experiment_name}] Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f}")
+
+        torch.cuda.empty_cache()
 
     save_checkpoint(
         f"{checkpoints_dir}/final_weights.pth",
