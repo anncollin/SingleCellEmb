@@ -18,6 +18,53 @@ from SSL.utils import update_teacher, ensure_dir, save_checkpoint, compute_exper
 
 
 #######################################################################################################
+# DMSO / SCR PROTOTYPE REGULARIZATION (extra loss)
+#######################################################################################################
+@torch.no_grad()
+def compute_dmso_scr_prototypes(student, dataset, gpu_transform, device):
+
+    dmso_emb = []
+    scr_emb  = []
+
+    for path in dataset.npy_files:
+
+        if "Plate001/001001" not in path and "siRNA_Plate001/001001" not in path:
+            continue
+
+        try:
+            arr = np.load(path)
+        except Exception:
+            print(f"[Corrupted npy skipped] {path}")
+            continue
+
+        try:
+            chans = dataset.channel_map[dataset.in_channels]
+            arr = arr[chans]
+
+            x = torch.from_numpy(arr).float().unsqueeze(0).to(device, non_blocking=True)
+            x = gpu_transform(x)[0]
+
+            h = student.backbone(x)
+
+        except Exception:
+            print(f"[Failed processing] {path}")
+            continue
+
+        if "Plate001/001001" in path:
+            dmso_emb.append(h.detach().cpu())
+        else:
+            scr_emb.append(h.detach().cpu())
+
+    if len(dmso_emb) == 0 or len(scr_emb) == 0:
+        return None, None
+
+    proto_dmso = torch.cat(dmso_emb, dim=0).mean(0).to(device)
+    proto_scr  = torch.cat(scr_emb,  dim=0).mean(0).to(device)
+
+    return proto_dmso, proto_scr
+
+
+#######################################################################################################
 # TIME FORMATTER
 #######################################################################################################
 def hms(seconds: float) -> str:
@@ -119,10 +166,13 @@ def train_one_epoch(
     epoch: int,
     gpu_transform,
     use_wandb: bool,
+    dataset,      # NEW
+    cfg,          # NEW
     device="cuda",
     base_momentum=0.996,
     max_momentum=1.0,
 ):
+
     student.train()
     teacher.eval()
 
@@ -130,8 +180,73 @@ def train_one_epoch(
     n_batches  = 0
 
     total_batches = len(dataloader)
-    max_batches   = max(1, int(0.1 * total_batches))  # hardcoded 10%
+    max_batches   = max(1, int(0.1 * total_batches))
 
+    # ==========================================================
+    # --------- Compute DMSO / SCR prototypes ONCE -------------
+    # ==========================================================
+    proto_dmso = None
+    proto_scr  = None
+
+    mode = cfg.get("joinDmsoSCr", "no")
+
+    if mode != "no":
+
+        student.eval()
+
+        dmso_paths = [p for p in dataset.npy_files if "Plate001/001001" in p and "siRNA_Plate001/001001" not in p]
+        scr_paths  = [p for p in dataset.npy_files if "siRNA_Plate001/001001" in p]
+
+        def _embed_paths(paths, batch_size=256):
+            feats = []
+            for i in range(0, len(paths), batch_size):
+                batch = []
+                for p in paths[i:i + batch_size]:
+                    try:
+                        arr = np.load(p)
+                    except Exception:
+                        continue
+                    chans = dataset.channel_map[dataset.in_channels]
+                    arr = arr[chans]
+                    batch.append(torch.from_numpy(arr).float())
+                if len(batch) == 0:
+                    continue
+                x = torch.stack(batch, dim=0).to(device, non_blocking=True)
+                x = gpu_transform(x)[0]
+                h = student.backbone(x)
+                feats.append(h)
+            if len(feats) == 0:
+                return None
+            return torch.cat(feats, dim=0).mean(0)
+
+        bs = int(cfg.get("proto_batch_size", 256))
+        with torch.no_grad():
+            proto_dmso = _embed_paths(dmso_paths, batch_size=bs)
+            proto_scr  = _embed_paths(scr_paths,  batch_size=bs)
+
+
+        student.train()
+
+        if use_wandb and proto_dmso is not None:
+
+            cos = torch.nn.functional.cosine_similarity(
+                proto_dmso.unsqueeze(0),
+                proto_scr.unsqueeze(0),
+                dim=1
+            ).item()
+
+            l2_dmso = proto_dmso.norm().item()
+            l2_scr  = proto_scr.norm().item()
+
+            wandb.log({
+                "proto_cosine_dmso_scr": cos,
+                "proto_l2_dmso": l2_dmso,
+                "proto_l2_scr": l2_scr,
+            }, step=epoch)
+
+    # ==========================================================
+    # --------------------- Train loop -------------------------
+    # ==========================================================
     data_iter = tqdm(dataloader, desc=f"Epoch {epoch+1}", ncols=100, disable=use_wandb)
 
     for it, images in enumerate(data_iter):
@@ -141,11 +256,32 @@ def train_one_epoch(
 
         images = images.to(device, non_blocking=True)
 
-        crops           = gpu_transform(images)
+        crops = gpu_transform(images)
+
         student_outputs = [student(c) for c in crops]
         teacher_outputs = [teacher(crops[0]), teacher(crops[1])]
 
-        loss = dino_loss(student_outputs, teacher_outputs, epoch)
+        loss_dino = dino_loss(student_outputs, teacher_outputs, epoch)
+
+        # -------- Extra loss --------
+        extra_loss = torch.tensor(0.0, device=device)
+
+        if proto_dmso is not None:
+
+            if mode == "yes":
+                extra_loss = torch.mean((proto_dmso - proto_scr) ** 2)
+
+            elif mode == "zero":
+                zero_vec = torch.zeros_like(proto_dmso)
+                extra_loss = (
+                    torch.mean((proto_dmso - proto_scr) ** 2)
+                    + torch.mean((proto_dmso - zero_vec) ** 2)
+                    + torch.mean((proto_scr - zero_vec) ** 2)
+                )
+
+        lambda_proto = float(cfg.get("joinDmsoSCr_lambda", 0.2))
+
+        loss = loss_dino + lambda_proto * extra_loss
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -174,7 +310,7 @@ def run_dino_experiment(cfg: Dict):
 
     if use_wandb:
         wandb.finish()
-        wandb.init(project="DINO_EGFPtest", name=cfg.get("experiment_name", "DINO_run"))
+        wandb.init(project="DINO_solveSiRNAcluste", name=cfg.get("experiment_name", "DINO_run"))
         wandb.config.update(cfg, allow_val_change=True)
 
     data_root = cfg["data_root"]
@@ -296,6 +432,8 @@ def run_dino_experiment(cfg: Dict):
             epoch,
             gpu_transform,
             use_wandb,
+            dataset,
+            cfg,
             device,
             base_momentum,
             max_momentum,
@@ -314,6 +452,8 @@ def run_dino_experiment(cfg: Dict):
             wandb.log({"loss": avg_loss}, step=epoch)
 
         print(f"[{experiment_name}] Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f}")
+
+        torch.cuda.empty_cache()
 
     save_checkpoint(
         f"{checkpoints_dir}/final_weights.pth",
