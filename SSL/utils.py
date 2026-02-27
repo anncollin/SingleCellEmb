@@ -59,7 +59,7 @@ def compute_population_embedding(
     population_zip_path: str,
     in_channels: str,
     device="cuda",
-    batch_size=2048,
+    batch_size=512,
 ):
     """
     Population embedding = mean of all cell embeddings.

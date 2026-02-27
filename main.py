@@ -6,7 +6,7 @@ import socket
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="torch.nn.utils.weight_norm")
 
-from SSL.train_dino import run_dino_experiment
+from SSL.train_dino_join import run_dino_experiment
 from SSL.eval_computeDistanceMatrix import evaluate_computeDistanceMatrix
 from SSL.eval_expertAnnotation import evaluate_expertAnnotation
 
