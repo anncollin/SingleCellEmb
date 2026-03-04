@@ -14,10 +14,12 @@ from torch.utils.data import Dataset, DataLoader
 class PopulationDataset(Dataset):
 
     def __init__(self, data_root: str, population_zip_path: str, in_channels: str):
-        population_path     = population_zip_path.replace(".zip", "")
-        self.population_dir = os.path.join(data_root, population_path)
+
+        population_path = population_zip_path.replace(".zip", ".npy")
+        self.npy_path = os.path.join(data_root, population_path)
 
         self.in_channels = in_channels.lower()
+
         self.channel_map = {
             "egfp": [0],
             "dapi": [1],
@@ -27,29 +29,26 @@ class PopulationDataset(Dataset):
         if self.in_channels not in self.channel_map:
             raise ValueError(f"Invalid in_channels={in_channels}")
 
-        if not os.path.isdir(self.population_dir):
-            self.npy_files = []
+        if not os.path.isfile(self.npy_path):
+            self.data = None
         else:
-            self.npy_files = sorted(
-                [
-                    os.path.join(self.population_dir, f)
-                    for f in os.listdir(self.population_dir)
-                    if f.endswith(".npy")
-                ]
-            )
+            self.data = np.load(self.npy_path, mmap_mode="r")
 
     def __len__(self):
-        return len(self.npy_files)
+
+        if self.data is None:
+            return 0
+
+        return self.data.shape[0]
 
     def __getitem__(self, idx):
-        try:
-            arr = np.load(self.npy_files[idx])
-        except Exception:
-            return self.__getitem__((idx + 1) % len(self.npy_files))  # skip bad file
+
+        arr = self.data[idx]  # (2,96,96)
 
         chans = self.channel_map[self.in_channels]
-        arr   = arr[chans]
-        return torch.from_numpy(arr).float()
+        arr = arr[chans]
+
+        return torch.from_numpy(np.asarray(arr)).float()
 
 
 @torch.no_grad()
@@ -78,7 +77,7 @@ def compute_population_embedding(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
+        num_workers=0,
         pin_memory=True,
     )
 

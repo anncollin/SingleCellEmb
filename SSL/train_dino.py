@@ -93,6 +93,7 @@ def compute_all_metrics(
         in_channels=dataloader.dataset.in_channels,
         device=device,
     )
+    print("expert_score", expert_score)
 
     return {
         "student_entropy": float(np.mean(student_ent)),
@@ -129,15 +130,9 @@ def train_one_epoch(
     total_loss = 0.0
     n_batches  = 0
 
-    total_batches = len(dataloader)
-    max_batches   = max(1, int(0.1 * total_batches))  # hardcoded 10%
-
     data_iter = tqdm(dataloader, desc=f"Epoch {epoch+1}", ncols=100, disable=use_wandb)
 
     for it, images in enumerate(data_iter):
-
-        if it >= max_batches:
-            break
 
         images = images.to(device, non_blocking=True)
 
@@ -152,7 +147,7 @@ def train_one_epoch(
         optimizer.step()
 
         momentum = max_momentum - (max_momentum - base_momentum) * (
-            math.cos(math.pi * (epoch + it / max_batches)) + 1.0
+            math.cos(math.pi * (epoch + it / len(dataloader))) + 1.0
         ) / 2.0
 
         update_teacher(student, teacher, momentum)
@@ -174,7 +169,7 @@ def run_dino_experiment(cfg: Dict):
 
     if use_wandb:
         wandb.finish()
-        wandb.init(project="DINO_EGFPtest", name=cfg.get("experiment_name", "DINO_run"))
+        wandb.init(project="DINO_newNPY", name=cfg.get("experiment_name", "DINO_run"))
         wandb.config.update(cfg, allow_val_change=True)
 
     data_root = cfg["data_root"]
@@ -219,7 +214,12 @@ def run_dino_experiment(cfg: Dict):
         cfg=cfg
     ).to(device)
 
-    dataset = CellDataset(root_dir=data_root, in_channels=in_channels)
+    dataset = CellDataset(
+        root_dir=data_root,
+        in_channels=in_channels,
+        cells_per_well=cfg.get("cells_per_well", None),
+        wells_csv=cfg.get("wells_csv", None),
+    )
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,

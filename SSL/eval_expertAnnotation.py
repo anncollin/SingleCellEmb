@@ -8,7 +8,6 @@ from SSL.utils import compute_expert_annotation_metric
 from SSL.model import create_vit_small_backbone, DINOHead, DINOStudent
 from SSL.eval_computeDistanceMatrix import (
     load_trained_student,
-    compute_embeddings_for_drug_folder,
     mean_emd_numpy,
 )
 
@@ -60,17 +59,21 @@ def evaluate_expertAnnotation(
 
         def get_embeddings(pop_path):
             if pop_path not in cache:
-                folder = os.path.join(
+
+                path = os.path.join(
                     cfg["data_root"],
-                    pop_path.replace(".zip", "")
+                    pop_path.replace(".zip", ".npy")
                 )
+
                 Z = compute_embeddings_for_drug_folder(
                     student,
-                    folder,
+                    path,
                     in_channels=in_channels,
                     device=device,
                 )
+
                 cache[pop_path] = Z.cpu().numpy()
+
             return cache[pop_path]
 
         for _, row in annotations.iterrows():

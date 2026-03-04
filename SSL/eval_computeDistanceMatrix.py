@@ -132,60 +132,50 @@ def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> Optional[str]:
         return None
 
     plate = matches.iloc[0, 0].strip()
-    well = matches.iloc[0, 1].strip()
+    well  = matches.iloc[0, 1].strip()
 
-    folder = os.path.join(cfg["data_root"], plate, well)
-    return folder if os.path.isdir(folder) else None
+    path = os.path.join(cfg["data_root"], plate, f"{well}.npy")
+
+    return path if os.path.isfile(path) else None
 
 
 #######################################################################################################
 # EMBEDDING COMPUTATION
 #######################################################################################################
 @torch.no_grad()
-def compute_embeddings_for_drug_folder(
+def compute_embeddings_for_well(
     student,
-    folder,
+    npy_path,
     in_channels: str,
     device="cuda",
     batch_size=128,
 ):
 
     in_channels = in_channels.lower()
+
     channel_map = {
         "egfp": [0],
         "dapi": [1],
         "both": [0, 1],
     }
-    if in_channels not in channel_map:
-        raise ValueError(f"Invalid in_channels={in_channels}")
 
     chans = channel_map[in_channels]
 
-    files = sorted(f for f in os.listdir(folder) if f.endswith(".npy"))
-
-    if len(files) == 0:
+    try:
+        data = np.load(npy_path, mmap_mode="r")   # (N,2,96,96)
+    except Exception:
         return torch.empty(0, student.backbone.num_features)
+
+    N = data.shape[0]
 
     out = []
 
-    for i in range(0, len(files), batch_size):
+    for i in range(0, N, batch_size):
 
-        batch_files = files[i:i + batch_size]
-        batch_list = []
+        arr = data[i:i+batch_size]       # (B,2,96,96)
+        arr = arr[:, chans]              # (B,C,96,96)
 
-        for f in batch_files:
-            path = os.path.join(folder, f)
-            try:
-                arr = np.load(path).astype(np.float32)  # (2, H, W)
-                arr = arr[chans]                       # (C, H, W)
-                batch_list.append(arr)
-            except Exception:
-                continue
-
-        if len(batch_list) == 0:
-            continue
-
-        batch = torch.from_numpy(np.stack(batch_list, axis=0))
+        batch = torch.from_numpy(np.asarray(arr)).float()
         batch = batch.to(device, non_blocking=True)
 
         z = student.backbone(batch)
@@ -438,7 +428,7 @@ def evaluate_computeDistanceMatrix(
         q_cls_list = []
 
         for global_idx, folder in enumerate(folder_list):
-            Z = compute_embeddings_for_drug_folder(
+            Z = compute_embeddings_for_well(
                 student,
                 folder,
                 in_channels=in_channels,

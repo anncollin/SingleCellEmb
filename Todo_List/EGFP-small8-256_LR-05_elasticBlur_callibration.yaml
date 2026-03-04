@@ -1,29 +1,33 @@
-experiment_name: "EGFP48x48-tiny8-256_lr-4_noDA_[70-100][10-40]"
+experiment_name: "EGFP-small8-256_LR-05_elasticBlur_callibration"
 
 # Dataset
-image_size: 48
+image_size: 96
 in_channels: egfp
 
 # ViT / DINO settings
 patch_size: 8
 out_dim: 256
-architecture: tiny  
+architecture: small
 
 # Training
-batch_size: 128
+batch_size: 64
 epochs: 250
 learning_rate: 1e-4
-weight_decay: 0.1
-num_workers: 0
+weight_decay: 0.05
+num_workers: 4
+
+# Dataset sampling
+cells_per_well: 512       # number of cells sampled per well per epoch
+wells_csv: /home/anncollin/Desktop/Nucleoles/dataset/labels/callibration.csv # null
 
 # DINO Multi-crop
-global_crops_scale: [0.7, 1.0]
+global_crops_scale: [0.6, 0.9]
 local_crops_scale: [0.1, 0.4]
 local_crops_number: 8
 
 # Augmentation settings
 augment:
-  elastic_p: 0.0
+  elastic_p: 0.5
   elastic_alpha_range: [5.0, 10.0] 
   elastic_sigma_range: [30.0, 50.0] 
 
@@ -43,7 +47,7 @@ augment:
 
   rotation_degrees: [-180, 180]      
 
-  blur_global_p: 0.0
+  blur_global_p: 0.5
   blur_global_sigma: [0.1, 1.0]
 
   blur_local_p: 0.0

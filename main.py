@@ -6,7 +6,7 @@ import socket
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="torch.nn.utils.weight_norm")
 
-from SSL.train_dino_join import run_dino_experiment
+from SSL.train_dino import run_dino_experiment
 from SSL.eval_computeDistanceMatrix import evaluate_computeDistanceMatrix
 from SSL.eval_expertAnnotation import evaluate_expertAnnotation
 
@@ -97,13 +97,13 @@ def main():
 
         if "anncollin" in hostname:
             print("you are on local machine")
-            cfg["data_root"]         = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB_npy/"
+            cfg["data_root"]         = "/home/anncollin/Desktop/Nucleoles/dataset/MyDB/"
             cfg["label_path"]        = "/home/anncollin/Desktop/Nucleoles/dataset/labels/unique_drugs.csv"
             cfg["callibration_path"] = "/home/anncollin/Desktop/Nucleoles/dataset/labels/callibration.csv"
 
         elif "orion" in hostname:
             print("you are on orion")
-            cfg["data_root"]         = "/DATA/annso/MyDB_npy"
+            cfg["data_root"]         = "/DATA/annso/MyDB"
             cfg["label_path"]        = "/DATA/annso/labels/unique_drugs.csv"
             cfg["callibration_path"] = "/DATA/annso/labels/callibration.csv"
 
@@ -132,7 +132,7 @@ def main():
 
         if do_train:
             print("Starting TRAIN phase...")
-            run_dino_experiment(cfg)
+            #run_dino_experiment(cfg)
 
             #print("Starting EVAL : Compute distance matrix [all + emd]")
             #evaluate_computeDistanceMatrix(cfg, subset="all", metric="emd")
