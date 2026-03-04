@@ -107,6 +107,12 @@ def main():
             cfg["label_path"]        = "/DATA/annso/labels/unique_drugs.csv"
             cfg["callibration_path"] = "/DATA/annso/labels/callibration.csv"
 
+        elif "mb-" in hostname or "manneback" in hostname:
+            print("you are on manneback")
+            cfg["data_root"]         = "/globalscratch/ucl/elen/acollin/MyDB/"
+            cfg["label_path"]        = "/globalscratch/ucl/elen/acollin/labels/unique_drugs.csv"
+            cfg["callibration_path"] = "/globalscratch/ucl/elen/acollin/labels/callibration.csv"
+
         else:
             print("Warning: you do not have access to the dataset from here!")
             cfg["label_path"]        = "/home/anncollin/SingleCellEmb/Dataset/unique_drugs.csv"

@@ -47,11 +47,16 @@ class CellDataset(Dataset):
             raise RuntimeError(f"No .npy files found in {root_dir}")
 
         # ------------------------------------------------------------------
-        # optional CSV filtering using unique_drugs.csv
-        # CSV format: plate, well_code, drug_name (no header)
+        # optional CSV filtering
         # ------------------------------------------------------------------
 
         if wells_csv is not None:
+
+            if wells_csv == "unique_drugs":
+                wells_csv = os.path.join(self.root_dir, "..", "labels", "unique_drugs.csv")
+
+            elif wells_csv == "callibration":
+                wells_csv = os.path.join(self.root_dir, "..", "labels", "callibration.csv")
 
             df = pd.read_csv(wells_csv, header=None, dtype=str)
             df.columns = ["plate", "well_code", "drug"]

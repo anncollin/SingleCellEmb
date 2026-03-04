@@ -18,7 +18,7 @@ num_workers: 4
 
 # Dataset sampling
 cells_per_well: 512       # number of cells sampled per well per epoch
-wells_csv: /home/anncollin/Desktop/Nucleoles/dataset/labels/callibration.csv # null
+wells_csv: callibration  # null, unique_drugs
 
 # DINO Multi-crop
 global_crops_scale: [0.6, 0.9]
