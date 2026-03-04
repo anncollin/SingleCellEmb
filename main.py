@@ -107,7 +107,7 @@ def main():
             cfg["label_path"]        = "/DATA/annso/labels/unique_drugs.csv"
             cfg["callibration_path"] = "/DATA/annso/labels/callibration.csv"
 
-        elif "mb-" in hostname or "manneback" in hostname:
+        elif hostname.startswith("mb-"):
             print("you are on manneback")
             cfg["data_root"]         = "/globalscratch/ucl/elen/acollin/MyDB/"
             cfg["label_path"]        = "/globalscratch/ucl/elen/acollin/labels/unique_drugs.csv"
