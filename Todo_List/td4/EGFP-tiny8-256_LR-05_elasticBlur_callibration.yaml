@@ -1,4 +1,4 @@
-experiment_name: "EGFP-tiny8-256_lr-01_elasticBlur_callibration"
+experiment_name: "EGFP-tiny8-256_LR-05_elasticBlur_callibration"
 
 # Dataset
 image_size: 96
@@ -11,9 +11,9 @@ architecture: tiny
 
 # Training
 batch_size: 64
-epochs: 250
-learning_rate: 1e-5
-weight_decay: 0.01
+epochs: 100
+learning_rate: 1e-4
+weight_decay: 0.05
 num_workers: 4
 
 # Dataset sampling
