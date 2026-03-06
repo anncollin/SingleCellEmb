@@ -414,7 +414,7 @@ def evaluate_computeDistanceMatrix(
     q_cls = None
 
     if os.path.isfile(emb_cache_path):
-        cache = torch.load(emb_cache_path, map_location="cpu", weights_only=True)
+        cache = torch.load(emb_cache_path, map_location="cpu")
         embeddings = cache.get("embeddings", None)
         q_cls = cache.get("q_cls", None)
         cached_drugs = cache.get("all_valid_drugs", None)
