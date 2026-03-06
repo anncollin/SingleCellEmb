@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=td2
+#SBATCH --job-name=td1
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:TeslaA10:1
 #SBATCH --cpus-per-task=8

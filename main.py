@@ -143,14 +143,15 @@ def main():
             #print("Starting EVAL : Compute distance matrix [all + emd]")
             #evaluate_computeDistanceMatrix(cfg, subset="all", metric="emd")
 
+
+        if do_eval: 
             print("Starting EVAL : Compute distance matrix [all + prototype]")
             evaluate_computeDistanceMatrix(cfg, subset="all", metric="prototype")
 
-        if do_eval: 
             # callibration or all 
             # prototype or emd 
-            print("Starting EVAL : Expert annotation [prototype]")
-            evaluate_expertAnnotation(cfg=cfg, metric="prototype")
+            #print("Starting EVAL : Expert annotation [prototype]")
+            #evaluate_expertAnnotation(cfg=cfg, metric="prototype")
             #print("Starting EVAL : Expert annotation [EMD]")
             #evaluate_expertAnnotation(cfg=cfg, metric="emd")
 

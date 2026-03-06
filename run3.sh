@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=td2
+#SBATCH --job-name=td3
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:GeForceRTX2080Ti:1
 #SBATCH --cpus-per-task=8
