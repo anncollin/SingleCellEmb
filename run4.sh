@@ -10,4 +10,4 @@ source ~/.bashrc
 conda activate nucleole
 cd ~/SingleCellEmb
 
-python main.py --todo Todo_List/td4 --train --wandb
+python main.py --todo Todo_List/td4 --wandb
