@@ -1,4 +1,4 @@
-experiment_name: "EGFP-small8-256_LR-05_elasticBlur_callibration"
+experiment_name: "[filteredData]EGFP-small8-256_LR-05_elasticBlur_callibration"
 
 # Dataset
 image_size: 96

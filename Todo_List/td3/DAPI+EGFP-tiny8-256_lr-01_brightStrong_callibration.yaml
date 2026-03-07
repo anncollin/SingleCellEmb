@@ -1,4 +1,4 @@
-experiment_name: "DAPI+EGFP-small8-256_lr-01_brightStrong_callibration"
+experiment_name: "[filteredData]DAPI+EGFP-tiny8-256_lr-01_brightStrong_callibration"
 
 # Dataset
 image_size: 96
@@ -7,7 +7,7 @@ in_channels: both
 # ViT / DINO settings
 patch_size: 8
 out_dim: 256
-architecture: small  
+architecture: tiny  
 
 # Training
 batch_size: 64

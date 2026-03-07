@@ -1,4 +1,4 @@
-experiment_name: "EGFP-tiny8-256_lr-01_elasticBlur_callibration"
+experiment_name: "[filteredData]EGFP-small8-256_lr-01_elasticBlur_callibration"
 
 # Dataset
 image_size: 96
@@ -7,7 +7,7 @@ in_channels: egfp
 # ViT / DINO settings
 patch_size: 8
 out_dim: 256
-architecture: tiny
+architecture: small
 
 # Training
 batch_size: 64

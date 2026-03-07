@@ -1,13 +1,13 @@
-experiment_name: "DAPI+EGFP-tiny8-256_lr-01_brightStrong_callibration"
+experiment_name: "[filteredData]EGFP-small8-256_lr-01_elasticBlur_unique"
 
 # Dataset
 image_size: 96
-in_channels: both
+in_channels: egfp
 
 # ViT / DINO settings
 patch_size: 8
 out_dim: 256
-architecture: tiny  
+architecture: small
 
 # Training
 batch_size: 64
@@ -18,7 +18,7 @@ num_workers: 4
 
 # Dataset sampling
 cells_per_well: 512       # number of cells sampled per well per epoch
-wells_csv: callibration  # null, unique_drugs
+wells_csv: unique_drugs  # null, unique_drugs
 
 # DINO Multi-crop
 global_crops_scale: [0.6, 0.9]
@@ -27,34 +27,34 @@ local_crops_number: 8
 
 # Augmentation settings
 augment:
-  elastic_p: 0.0
-  elastic_alpha_range: [4.0, 8.0] 
-  elastic_sigma_range: [30.0, 40.0] 
+  elastic_p: 0.5
+  elastic_alpha_range: [5.0, 10.0] 
+  elastic_sigma_range: [30.0, 50.0] 
 
   solarization_p: 0.0
 
-  brightness_dapi_p: 0.8
-  brightness_dapi_range: [0.2, 4.0]
+  brightness_dapi_p: 0.0
+  brightness_dapi_range: [0.5, 2.0]
 
-  brightness_egfp_p: 0.5
-  brightness_egfp_range: [0.3, 4.0]
+  brightness_egfp_p: 0.0
+  brightness_egfp_range: [0.7, 2.0]
 
   contrast_p: 0.0
   contrast_range: [0.5, 1.9]
 
   sharpness_p : 0.0
-  sharpness_factor : 25.0
+  sharpness_factor : 5.0
 
   rotation_degrees: [-180, 180]      
 
-  blur_global_p: 0.0
-  blur_global_sigma: [10, 20.0]
+  blur_global_p: 0.5
+  blur_global_sigma: [0.1, 1.0]
 
   blur_local_p: 0.0
   blur_local_sigma: [0.5, 3.0]
 
   noise_global_p: 0.0
-  noise_global_std: [0.001, 0.003]
+  noise_global_std: [0.001, 0.005]
 
   noise_local_p: 0.0
   noise_local_std: [0.001, 0.003]
