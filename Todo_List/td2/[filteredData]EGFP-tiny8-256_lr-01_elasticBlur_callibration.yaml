@@ -1,4 +1,4 @@
-experiment_name: "[filteredData]DAPI+EGFP-tiny8-256_LR-05_callibration"
+experiment_name: "[filteredData]EGFP-tiny8-256_lr-01_elasticBlur_callibration"
 
 # Dataset
 image_size: 96
