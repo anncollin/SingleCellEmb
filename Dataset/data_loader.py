@@ -223,29 +223,11 @@ class PopulationDataset(Dataset):
         arr    = data[:, self.channel_map[self.in_channels]]
 
         ########################
-        import cv2
-
         if "siRNA" in path:
 
-            zoom = 1.12  # example zoom factor
+            brightness = 0.5
+            arr[:, 1] = np.clip(arr[:, 1] * brightness, 0.0, None)  # DAPI only
 
-            N, C, H, W = arr.shape
-            out = np.zeros_like(arr)
-
-            for n in range(N):
-                for c in range(C):
-
-                    img = arr[n, c]
-
-                    resized = cv2.resize(img, None, fx=zoom, fy=zoom, interpolation=cv2.INTER_LINEAR)
-
-                    h, w = resized.shape
-                    start_h = (h - H) // 2
-                    start_w = (w - W) // 2
-
-                    out[n, c] = resized[start_h:start_h+H, start_w:start_w+W]
-
-            arr = out
         ########################
         tensor = torch.from_numpy(np.asarray(arr)).float()
 
