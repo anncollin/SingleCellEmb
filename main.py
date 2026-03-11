@@ -153,6 +153,7 @@ def main():
             #print("Starting EVAL : Expert annotation [prototype]")
 
             evaluate_expertAnnotation(cfg=cfg, metric="prototype")
+            evaluate_computeDistanceMatrix(cfg, subset="all", metric="prototype")
             #print("Starting EVAL : Expert annotation [EMD]")
             #evaluate_expertAnnotation(cfg=cfg, metric="emd")
 

@@ -215,14 +215,16 @@ class PopulationDataset(Dataset):
     def __getitem__(self, idx):
 
         path, drug = self.samples[idx]
-
-        data = np.load(path, mmap_mode="r")
+        data       = np.load(path, mmap_mode="r")
 
         if data.ndim != 4:
             raise ValueError(f"Expected (N,2,96,96), got {data.shape}")
 
-        arr = data[:, self.channel_map[self.in_channels]]
+        arr    = data[:, self.channel_map[self.in_channels]]
 
+        ########################
+        arr[:, 1] = 0.0
+        ########################
         tensor = torch.from_numpy(np.asarray(arr)).float()
 
         return tensor, drug

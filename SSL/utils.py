@@ -348,3 +348,65 @@ def visualize_multicrop(dataset, gpu_transform, device="cuda", channel_display="
 
     plt.tight_layout()
     plt.show()
+
+
+#######################################################################################################
+# VISUALIZE RANDOM CELLS FROM POPULATION DATASET
+#######################################################################################################
+@torch.no_grad()
+def visualize_population_samples(dataset, n_wells=5, cells_per_well=5, channel_display="both"):
+    """
+    Displays random cells from several wells of a PopulationDataset.
+
+    Each row corresponds to one well and each column to a random cell
+    from that well.
+    """
+
+    def make_view(x, mode):
+        x = np.clip(x, 0.0, 1.0)
+
+        if mode == "egfp":
+            rgb = np.zeros((x.shape[1], x.shape[2], 3), dtype=np.float32)
+            rgb[..., 1] = np.clip(x[0] * 3.0, 0.0, 1.0)
+            return rgb
+
+        if mode == "dapi":
+            rgb = np.zeros((x.shape[1], x.shape[2], 3), dtype=np.float32)
+            rgb[..., 2] = np.clip(x[0] * 3.0, 0.0, 1.0)
+            return rgb
+
+        if mode == "both":
+            rgb = np.zeros((x.shape[1], x.shape[2], 3), dtype=np.float32)
+            rgb[..., 1] = np.clip(x[0] * 3.0, 0.0, 1.0)
+            rgb[..., 2] = np.clip(x[1] * 3.0, 0.0, 1.0)
+            return rgb
+
+        raise ValueError("channel_display must be 'egfp', 'dapi', or 'both'")
+
+    well_indices = random.sample(range(len(dataset)), n_wells)
+
+    fig, axes = plt.subplots(n_wells, cells_per_well, figsize=(3 * cells_per_well, 3 * n_wells))
+
+    for row, well_idx in enumerate(well_indices):
+
+        tensor, drug = dataset[well_idx]
+        tensor = tensor.cpu()
+
+        N = tensor.shape[0]
+        cell_idxs = random.sample(range(N), min(cells_per_well, N))
+
+        for col, cell_idx in enumerate(cell_idxs):
+
+            x = tensor[cell_idx].numpy()
+            view = make_view(x, channel_display)
+
+            axes[row, col].imshow(view)
+            axes[row, col].axis("off")
+
+            if row == 0:
+                axes[row, col].set_title(f"Cell {col+1}")
+
+        axes[row, 0].set_ylabel(drug, rotation=90, size=10)
+
+    plt.tight_layout()
+    plt.show()

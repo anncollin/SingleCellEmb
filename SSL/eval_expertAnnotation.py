@@ -25,6 +25,23 @@ def evaluate_expertAnnotation(
 
     student = load_trained_student(ckpt_path, cfg, device=device)
 
+    # ------------------------------------------------------------------
+    # visualize some population samples
+    # ------------------------------------------------------------------
+    """
+    from Dataset.data_loader import PopulationDataset
+    from SSL.utils import visualize_population_samples
+    dataset = PopulationDataset(
+        root_dir=cfg["data_root"],
+        wells_csv=cfg["label_path"],
+        in_channels=in_channels,
+    )
+
+    visualize_population_samples(dataset)
+    """
+    # ------------------------------------------------------------------
+
+
     score = compute_expert_annotation_metric(
         student=student,
         data_root=cfg["data_root"],
