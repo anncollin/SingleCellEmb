@@ -227,7 +227,7 @@ class PopulationDataset(Dataset):
 
         if "siRNA" in path:
 
-            zoom = 1.22  # example zoom factor
+            zoom = 1.12  # example zoom factor
 
             N, C, H, W = arr.shape
             out = np.zeros_like(arr)
