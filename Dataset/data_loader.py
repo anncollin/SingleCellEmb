@@ -225,7 +225,7 @@ class PopulationDataset(Dataset):
         ########################
         if "siRNA" in path:
 
-            brightness = 0.5
+            brightness = 1.0
             arr[:, 1] = np.clip(arr[:, 1] * brightness, 0.0, None)  # DAPI only
 
         ########################
