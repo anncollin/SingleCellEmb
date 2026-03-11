@@ -74,7 +74,7 @@ def compute_expert_annotation_metric(
 
     dataset = PopulationDataset(
         root_dir=data_root,
-        wells_csv="./Dataset/unique_drugs.csv",
+        wells_csv=None,
         in_channels=in_channels,
     )
 
@@ -93,6 +93,7 @@ def compute_expert_annotation_metric(
 
             idx = well_index.get(pop_path, None)
             if idx is None:
+                print("Missing:", pop_path)
                 return None
 
             tensor, _ = dataset[idx]

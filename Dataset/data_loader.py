@@ -177,7 +177,7 @@ class PopulationDataset(Dataset):
     def __init__(
         self,
         root_dir,
-        wells_csv,
+        wells_csv=None,
         in_channels="both"
     ):
         super().__init__()
@@ -193,17 +193,40 @@ class PopulationDataset(Dataset):
             "both": [0, 1],
         }
 
-        df = pd.read_csv(wells_csv, header=None, dtype=str)
-        df.columns = ["plate", "well_code", "drug"]
-
         self.samples = []
 
-        for plate, well_code, drug in zip(df["plate"], df["well_code"], df["drug"]):
+        # -----------------------------------------
+        # CASE 1: CSV restriction (distance matrix)
+        # -----------------------------------------
+        if wells_csv is not None:
 
-            npy_path = os.path.join(root_dir, plate, f"{well_code}.npy")
+            df = pd.read_csv(wells_csv, header=None, dtype=str)
+            df.columns = ["plate", "well_code", "drug"]
 
-            if os.path.isfile(npy_path):
-                self.samples.append((npy_path, drug.strip()))
+            for plate, well_code, drug in zip(df["plate"], df["well_code"], df["drug"]):
+
+                npy_path = os.path.join(root_dir, plate, f"{well_code}.npy")
+
+                if os.path.isfile(npy_path):
+                    self.samples.append((npy_path, drug.strip()))
+
+        # -----------------------------------------
+        # CASE 2: scan whole dataset (annotations)
+        # -----------------------------------------
+        else:
+
+            for plate in os.listdir(root_dir):
+
+                plate_dir = os.path.join(root_dir, plate)
+                if not os.path.isdir(plate_dir):
+                    continue
+
+                for f in os.listdir(plate_dir):
+
+                    if f.endswith(".npy"):
+
+                        npy_path = os.path.join(plate_dir, f)
+                        self.samples.append((npy_path, None))
 
         if len(self.samples) == 0:
             raise RuntimeError("No wells found for PopulationDataset")
