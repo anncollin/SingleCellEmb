@@ -12,18 +12,10 @@ def evaluate_expertAnnotation(
     cfg: Dict,
     metric: str = "prototype",
 ):
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     experiment_name = cfg["experiment_name"]
     in_channels = cfg.get("in_channels", "both")
-
-    base_dir = os.getcwd().replace("/Todo_List", "")
-    results_root = os.path.join(base_dir, "Results", experiment_name)
-
-    ckpt_path = os.path.join(results_root, "checkpoints", "final_weights.pth")
-
-    student = load_trained_student(ckpt_path, cfg, device=device)
 
     # ------------------------------------------------------------------
     # visualize some population samples
@@ -41,6 +33,12 @@ def evaluate_expertAnnotation(
     """
     # ------------------------------------------------------------------
 
+    base_dir = os.getcwd().replace("/Todo_List", "")
+    results_root = os.path.join(base_dir, "Results", experiment_name)
+
+    ckpt_path = os.path.join(results_root, "checkpoints", "final_weights.pth")
+
+    student = load_trained_student(ckpt_path, cfg, device=device)
 
     score = compute_expert_annotation_metric(
         student=student,

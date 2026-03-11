@@ -6,6 +6,8 @@ import random
 import pandas as pd
 import torch
 
+from Dataset.data_loader import PopulationDataset
+
 
 #######################################################################################################
 # MEAN EARTH MOVER DISTANCE BETWEEN TWO EMBEDDING SETS
@@ -58,49 +60,6 @@ def mean_emd_numpy(
 
     return score / float(d)
 
-#######################################################################################################
-# COMPUTE EXPERT ANNOTATION CONSISTENCY METRIC
-# ----------------------------------------------------------------------------------------------------
-# Computes the agreement between model-derived population distances and expert annotations.
-#
-# For each triplet (A, B, C) defined in the annotations CSV, the function evaluates whether
-# the relative distances between drug populations match the expected relationships specified
-# by human experts.
-#
-# Population embeddings are computed by:
-#     1) loading all cells from a well,
-#     2) extracting backbone features for each cell,
-#     3) averaging the features to obtain a population representation.
-#
-# The final score corresponds to the percentage of annotation triplets for which the
-# model distances satisfy the expert-defined condition.
-#
-# ----------------------------------------------------------------------------------------------------
-#    Parameters:
-#    ---------------------------
-#    student : nn.Module
-#        Trained student model containing the backbone used to extract cell embeddings.
-#
-#    data_root : str
-#        Root directory containing the dataset organized as:
-#        data_root/plate/well.npy
-#
-#    annotations_csv : str
-#        CSV file containing expert annotations with columns:
-#        A, B, C, q1_yesno, which, both.
-#
-#    in_channels : str
-#        Input channels used by the model ("egfp", "dapi", or "both").
-#
-#    device : str
-#        Device used for inference ("cuda" or "cpu").
-#
-#    Returns:
-#    ---------------------------
-#    score : float
-#        Percentage of annotation triplets that satisfy the expert-defined relationships.
-#######################################################################################################
-
 @torch.no_grad()
 def compute_expert_annotation_metric(
     student,
@@ -110,40 +69,40 @@ def compute_expert_annotation_metric(
     device="cuda",
     metric: str = "prototype",
 ):
-    """
-    Expert-annotation consistency metric (cases 1, 2, 3 only).
-    Uses PopulationDataset to compute embeddings for wells.
-    """
 
     df = pd.read_csv(annotations_csv)
 
-    channel_map = {
-        "egfp": [0],
-        "dapi": [1],
-        "both": [0, 1],
-    }
+    dataset = PopulationDataset(
+        root_dir=data_root,
+        wells_csv="./Dataset/unique_drugs.csv",
+        in_channels=in_channels,
+    )
 
-    chans = channel_map[in_channels.lower()]
+    well_index = {}
+    for i, (path, drug) in enumerate(dataset.samples):
+        plate = os.path.basename(os.path.dirname(path))
+        well  = os.path.basename(path).replace(".npy", ".zip")
+        key   = f"{plate}/{well}"
+        well_index[key] = i
+
     cache = {}
 
     def get_population_embeddings(pop_path):
 
         if pop_path not in cache:
 
-            plate = pop_path.split("/")[0]
-            well  = os.path.basename(pop_path).replace(".zip", ".npy")
-            npy_path = os.path.join(data_root, plate, well)
+            idx = well_index.get(pop_path, None)
+            if idx is None:
+                return None
 
-            data = np.load(npy_path, mmap_mode="r")
-            arr  = data[:, chans]
-
-            tensor = torch.from_numpy(arr).float()
+            tensor, _ = dataset[idx]
+            tensor = tensor.to(device)
 
             feats = []
             batch_size = 512
 
             for i in range(0, tensor.shape[0], batch_size):
-                batch = tensor[i:i+batch_size].to(device)
+                batch = tensor[i:i+batch_size]
                 z = student.backbone(batch)
                 feats.append(z.cpu())
 
@@ -183,6 +142,9 @@ def compute_expert_annotation_metric(
         embA = get_population_embeddings(A)
         embB = get_population_embeddings(B)
         embC = get_population_embeddings(C)
+
+        if embA is None or embB is None or embC is None:
+            continue
 
         if metric == "prototype":
 
@@ -353,14 +315,43 @@ def visualize_multicrop(dataset, gpu_transform, device="cuda", channel_display="
 #######################################################################################################
 # VISUALIZE RANDOM CELLS FROM POPULATION DATASET
 #######################################################################################################
-@torch.no_grad()
-def visualize_population_samples(dataset, n_wells=5, cells_per_well=5, channel_display="both"):
-    """
-    Displays random cells from several wells of a PopulationDataset.
 
-    Each row corresponds to one well and each column to a random cell
-    from that well.
-    """
+@torch.no_grad()
+def compute_dapi_ratio(dataset):
+
+    dmso_pixels = 0
+    dmso_total  = 0
+
+    scr_pixels = 0
+    scr_total  = 0
+
+    for i, (_, drug) in enumerate(dataset.samples):
+
+        tensor, _ = dataset[i]        # (N,C,H,W)
+        dapi = tensor[:, 1].numpy()   # DAPI channel
+
+        nonzero = (dapi > 0).sum()
+        total   = dapi.size
+
+        if drug == "DMSO":
+            dmso_pixels += nonzero
+            dmso_total  += total
+
+        elif drug == "SCR":
+            scr_pixels += nonzero
+            scr_total  += total
+
+    dmso_mean = dmso_pixels / dmso_total
+    scr_mean  = scr_pixels  / scr_total
+
+    print("DAPI non-zero area")
+    print("DMSO:", dmso_mean)
+    print("SCR :", scr_mean)
+    print("DMSO/SCR ratio:", dmso_mean / scr_mean)
+    
+
+@torch.no_grad()
+def visualize_population_samples(dataset, cells_per_row=10, channel_display="both"):
 
     def make_view(x, mode):
         x = np.clip(x, 0.0, 1.0)
@@ -381,32 +372,66 @@ def visualize_population_samples(dataset, n_wells=5, cells_per_well=5, channel_d
             rgb[..., 2] = np.clip(x[1] * 3.0, 0.0, 1.0)
             return rgb
 
-        raise ValueError("channel_display must be 'egfp', 'dapi', or 'both'")
+    dmso_wells = []
+    scr_wells  = []
 
-    well_indices = random.sample(range(len(dataset)), n_wells)
+    # FAST: do not load .npy files
+    for i, (_, drug) in enumerate(dataset.samples):
+        if drug == "DMSO":
+            dmso_wells.append(i)
+        elif drug == "SCR":
+            scr_wells.append(i)
 
-    fig, axes = plt.subplots(n_wells, cells_per_well, figsize=(3 * cells_per_well, 3 * n_wells))
+    fig, axes = plt.subplots(4, cells_per_row, figsize=(3 * cells_per_row, 12))
 
-    for row, well_idx in enumerate(well_indices):
+    # ---------------- DMSO ----------------
+    dmso_ratios = []
 
-        tensor, drug = dataset[well_idx]
-        tensor = tensor.cpu()
+    for row in range(2):
+        tensor, _ = dataset[random.choice(dmso_wells)]
+        idxs = random.sample(range(tensor.shape[0]), cells_per_row)
 
-        N = tensor.shape[0]
-        cell_idxs = random.sample(range(N), min(cells_per_well, N))
+        for col, idx in enumerate(idxs):
 
-        for col, cell_idx in enumerate(cell_idxs):
+            x = tensor[idx].numpy()
+            dapi = x[1]                     # DAPI channel
+            dmso_ratios.append((dapi > 0).mean())
 
-            x = tensor[cell_idx].numpy()
             view = make_view(x, channel_display)
-
             axes[row, col].imshow(view)
             axes[row, col].axis("off")
 
-            if row == 0:
-                axes[row, col].set_title(f"Cell {col+1}")
 
-        axes[row, 0].set_ylabel(drug, rotation=90, size=10)
+    # ---------------- SCR ----------------
+    scr_ratios = []
+
+    for row in range(2):
+        tensor, _ = dataset[random.choice(scr_wells)]
+        idxs = random.sample(range(tensor.shape[0]), cells_per_row)
+
+        for col, idx in enumerate(idxs):
+
+            x = tensor[idx].numpy()
+            dapi = x[1]
+            scr_ratios.append((dapi > 0).mean())
+
+            view = make_view(x, channel_display)
+            axes[row + 2, col].imshow(view)
+            axes[row + 2, col].axis("off")
+
+
+    # ---------------- ratio ----------------
+    dmso_mean = np.mean(dmso_ratios)
+    scr_mean  = np.mean(scr_ratios)
+
+    print("DAPI non-zero area")
+    print("DMSO:", dmso_mean)
+    print("SCR :", scr_mean)
+    print("DMSO/SCR ratio:", dmso_mean / scr_mean)
+
+    # ---------------- labels ----------------
+    axes[0,0].set_title("DMSO", fontsize=12)
+    axes[2,0].set_title("SCR", fontsize=12)
 
     plt.tight_layout()
     plt.show()

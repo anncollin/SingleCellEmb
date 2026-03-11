@@ -146,7 +146,7 @@ def main():
 
         if do_eval: 
             #print("Starting EVAL : Compute distance matrix [all + prototype]")
-            evaluate_computeDistanceMatrix(cfg, subset="callibration", metric="prototype")
+            #evaluate_computeDistanceMatrix(cfg, subset="callibration", metric="prototype")
 
             # callibration or all 
             # prototype or emd 
