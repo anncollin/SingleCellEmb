@@ -6,8 +6,33 @@ import pandas as pd
 
 
 #######################################################################################################
-# DATASET FOR MyDB  (N,2,96,96)
+# CELL DATASET
+# ----------------------------------------------------------------------------------------------------
+# Dataset used for self-supervised training (DINO).
+#
+# This dataset loads wells stored as `.npy` files containing cell populations with shape:
+#
+#     (N_cells, 2, 96, 96)
+#
+# where:
+#     channel 0 = EGFP
+#     channel 1 = DAPI
+#
+# Each dataset sample corresponds to **one randomly selected cell** from a well.
+# The random cell selection is performed at every `__getitem__` call.
+#
+# The dataset therefore behaves as a large pool of cells sampled across wells.
+#
+# Optional features:
+#     - Restrict wells using a CSV file (e.g. unique_drugs.csv or callibration.csv)
+#     - Sample a fixed number of cells per well (`cells_per_well`)
+#     - Select input channels (EGFP, DAPI, or both)
+#     - Apply augmentations through `transform`
+#
+# This dataset is intended for **training** where stochastic sampling and
+# data augmentation are required.
 #######################################################################################################
+
 class CellDataset(Dataset):
 
     def __init__(
@@ -33,10 +58,6 @@ class CellDataset(Dataset):
             "both": [0, 1],
         }
 
-        # ------------------------------------------------------------------
-        # collect npy wells
-        # ------------------------------------------------------------------
-
         all_wells = []
         for r, _, files in os.walk(root_dir):
             for f in files:
@@ -45,10 +66,6 @@ class CellDataset(Dataset):
 
         if len(all_wells) == 0:
             raise RuntimeError(f"No .npy files found in {root_dir}")
-
-        # ------------------------------------------------------------------
-        # optional CSV filtering
-        # ------------------------------------------------------------------
 
         if wells_csv is not None:
 
@@ -87,11 +104,6 @@ class CellDataset(Dataset):
 
         print(f"[CellDataset] Using {len(self.npy_files)} wells")
 
-        # ------------------------------------------------------------------
-        # build index list
-        # each entry = (well_path)
-        # ------------------------------------------------------------------
-
         if cells_per_well is None:
             self.index_list = self.npy_files
         else:
@@ -113,10 +125,9 @@ class CellDataset(Dataset):
         if data.ndim != 4:
             raise ValueError(f"Expected (N,2,96,96), got {data.shape}")
 
-        # random cell
         i = np.random.randint(0, data.shape[0])
 
-        arr = data[i]  # (2,96,96)
+        arr = data[i]
 
         arr = arr[self.channel_map[self.in_channels]]
 
@@ -126,3 +137,92 @@ class CellDataset(Dataset):
             tensor = self.transform(tensor)
 
         return tensor
+
+
+#######################################################################################################
+# POPULATION DATASET
+# ----------------------------------------------------------------------------------------------------
+# Dataset used for evaluation and embedding computation.
+#
+# This dataset loads the **entire population of cells from a well** stored as:
+#
+#     (N_cells, 2, 96, 96)
+#
+# Unlike `CellDataset`, this dataset does **not randomly sample cells**.
+# Instead, it returns all cells from a well at once.
+#
+# Each sample returned by the dataset is:
+#
+#     tensor : (N_cells, C, 96, 96)
+#     drug   : str
+#
+# where:
+#     C depends on the selected input channels (EGFP, DAPI, or both).
+#
+# The drug label is read from a CSV file with columns:
+#
+#     plate, well_code, drug_name
+#
+# This dataset is typically used during evaluation to:
+#
+#     - compute embeddings for all cells in a well
+#     - aggregate them into population representations
+#     - compute distances between drug profiles
+#
+# No data augmentation or random sampling is performed.
+#######################################################################################################
+
+class PopulationDataset(Dataset):
+
+    def __init__(
+        self,
+        root_dir,
+        wells_csv,
+        in_channels="both"
+    ):
+        super().__init__()
+
+        self.root_dir = root_dir
+        self.in_channels = in_channels.lower()
+
+        assert self.in_channels in {"egfp", "dapi", "both"}
+
+        self.channel_map = {
+            "egfp": [0],
+            "dapi": [1],
+            "both": [0, 1],
+        }
+
+        df = pd.read_csv(wells_csv, header=None, dtype=str)
+        df.columns = ["plate", "well_code", "drug"]
+
+        self.samples = []
+
+        for plate, well_code, drug in zip(df["plate"], df["well_code"], df["drug"]):
+
+            npy_path = os.path.join(root_dir, plate, f"{well_code}.npy")
+
+            if os.path.isfile(npy_path):
+                self.samples.append((npy_path, drug.strip()))
+
+        if len(self.samples) == 0:
+            raise RuntimeError("No wells found for PopulationDataset")
+
+    def __len__(self):
+
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+
+        path, drug = self.samples[idx]
+
+        data = np.load(path, mmap_mode="r")
+
+        if data.ndim != 4:
+            raise ValueError(f"Expected (N,2,96,96), got {data.shape}")
+
+        arr = data[:, self.channel_map[self.in_channels]]
+
+        tensor = torch.from_numpy(np.asarray(arr)).float()
+
+        return tensor, drug

@@ -5,93 +5,101 @@ import numpy as np
 import random
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
+
 
 #######################################################################################################
-# COMPUTE EXPERT ANNOTATION METRIC
+# MEAN EARTH MOVER DISTANCE BETWEEN TWO EMBEDDING SETS
+# ----------------------------------------------------------------------------------------------------
+# Computes the mean 1D Wasserstein (Earth Mover) distance between two sets of embeddings.
+#
+# Each embedding dimension is treated independently and the Wasserstein distance
+# is computed between the corresponding distributions of the two populations.
+# The final score is the average distance across all embedding dimensions.
+#
+# ----------------------------------------------------------------------------------------------------
+#    Parameters:
+#    ---------------------------
+#    emb_A : np.ndarray
+#        Array of shape (N_A, D) containing embeddings for population A.
+#
+#    emb_B : np.ndarray
+#        Array of shape (N_B, D) containing embeddings for population B.
+#
+#    normalize : bool
+#        If True, embeddings are L2-normalized before computing distances.
+#
+#    Returns:
+#    ---------------------------
+#    distance : float
+#        Mean Wasserstein distance across all embedding dimensions.
 #######################################################################################################
 
-class PopulationDataset(Dataset):
+def mean_emd_numpy(
+    emb_A: np.ndarray,
+    emb_B: np.ndarray,
+    normalize: bool = False,
+) -> float:
 
-    def __init__(self, data_root: str, population_zip_path: str, in_channels: str):
+    from scipy.stats import wasserstein_distance
+    import torch.nn.functional as F
 
-        population_path = population_zip_path.replace(".zip", ".npy")
-        self.npy_path = os.path.join(data_root, population_path)
+    if emb_A.size == 0 or emb_B.size == 0:
+        return float("nan")
 
-        self.in_channels = in_channels.lower()
+    if normalize:
+        emb_A = F.normalize(torch.from_numpy(emb_A), p=2, dim=1).numpy()
+        emb_B = F.normalize(torch.from_numpy(emb_B), p=2, dim=1).numpy()
 
-        self.channel_map = {
-            "egfp": [0],
-            "dapi": [1],
-            "both": [0, 1],
-        }
+    d = emb_A.shape[1]
+    score = 0.0
 
-        if self.in_channels not in self.channel_map:
-            raise ValueError(f"Invalid in_channels={in_channels}")
+    for i in range(d):
+        score += wasserstein_distance(emb_A[:, i], emb_B[:, i])
 
-        if not os.path.isfile(self.npy_path):
-            self.data = None
-        else:
-            self.data = np.load(self.npy_path, mmap_mode="r")
+    return score / float(d)
 
-    def __len__(self):
-
-        if self.data is None:
-            return 0
-
-        return self.data.shape[0]
-
-    def __getitem__(self, idx):
-
-        arr = self.data[idx]  # (2,96,96)
-
-        chans = self.channel_map[self.in_channels]
-        arr = arr[chans]
-
-        return torch.from_numpy(np.asarray(arr)).float()
-
-
-@torch.no_grad()
-def compute_population_embedding(
-    model,
-    data_root: str,
-    population_zip_path: str,
-    in_channels: str,
-    device="cuda",
-    batch_size=512,
-):
-    """
-    Population embedding = mean of all cell embeddings.
-    """
-
-    dataset = PopulationDataset(
-        data_root=data_root,
-        population_zip_path=population_zip_path,
-        in_channels=in_channels,
-    )
-
-    if len(dataset) == 0:
-        return None
-    
-    loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=True,
-    )
-
-    feats = []
-
-    for x in loader:
-        x = x.to(device, non_blocking=True)
-        h = model.backbone(x)
-        feats.append(h.cpu())
-
-    feats = torch.cat(feats, dim=0)
-    #print("feats.shape =", feats.shape)
-    return feats.mean(dim=0)
-
+#######################################################################################################
+# COMPUTE EXPERT ANNOTATION CONSISTENCY METRIC
+# ----------------------------------------------------------------------------------------------------
+# Computes the agreement between model-derived population distances and expert annotations.
+#
+# For each triplet (A, B, C) defined in the annotations CSV, the function evaluates whether
+# the relative distances between drug populations match the expected relationships specified
+# by human experts.
+#
+# Population embeddings are computed by:
+#     1) loading all cells from a well,
+#     2) extracting backbone features for each cell,
+#     3) averaging the features to obtain a population representation.
+#
+# The final score corresponds to the percentage of annotation triplets for which the
+# model distances satisfy the expert-defined condition.
+#
+# ----------------------------------------------------------------------------------------------------
+#    Parameters:
+#    ---------------------------
+#    student : nn.Module
+#        Trained student model containing the backbone used to extract cell embeddings.
+#
+#    data_root : str
+#        Root directory containing the dataset organized as:
+#        data_root/plate/well.npy
+#
+#    annotations_csv : str
+#        CSV file containing expert annotations with columns:
+#        A, B, C, q1_yesno, which, both.
+#
+#    in_channels : str
+#        Input channels used by the model ("egfp", "dapi", or "both").
+#
+#    device : str
+#        Device used for inference ("cuda" or "cpu").
+#
+#    Returns:
+#    ---------------------------
+#    score : float
+#        Percentage of annotation triplets that satisfy the expert-defined relationships.
+#######################################################################################################
 
 @torch.no_grad()
 def compute_expert_annotation_metric(
@@ -100,12 +108,55 @@ def compute_expert_annotation_metric(
     annotations_csv: str,
     in_channels: str,
     device="cuda",
+    metric: str = "prototype",
 ):
     """
     Expert-annotation consistency metric (cases 1, 2, 3 only).
+    Uses PopulationDataset to compute embeddings for wells.
     """
 
     df = pd.read_csv(annotations_csv)
+
+    channel_map = {
+        "egfp": [0],
+        "dapi": [1],
+        "both": [0, 1],
+    }
+
+    chans = channel_map[in_channels.lower()]
+    cache = {}
+
+    def get_population_embeddings(pop_path):
+
+        if pop_path not in cache:
+
+            plate = pop_path.split("/")[0]
+            well  = os.path.basename(pop_path).replace(".zip", ".npy")
+            npy_path = os.path.join(data_root, plate, well)
+
+            data = np.load(npy_path, mmap_mode="r")
+            arr  = data[:, chans]
+
+            tensor = torch.from_numpy(arr).float()
+
+            feats = []
+            batch_size = 512
+
+            for i in range(0, tensor.shape[0], batch_size):
+                batch = tensor[i:i+batch_size].to(device)
+                z = student.backbone(batch)
+                feats.append(z.cpu())
+
+            feats = torch.cat(feats, dim=0)
+
+            if metric == "prototype":
+                cache[pop_path] = feats.mean(dim=0)
+            elif metric == "emd":
+                cache[pop_path] = feats.numpy()
+            else:
+                raise ValueError("metric must be 'prototype' or 'emd'")
+
+        return cache[pop_path]
 
     total = 0
     valid = 0
@@ -129,16 +180,21 @@ def compute_expert_annotation_metric(
         else:
             continue
 
-        embA = compute_population_embedding(student, data_root, A, in_channels, device)
-        embB = compute_population_embedding(student, data_root, B, in_channels, device)
-        embC = compute_population_embedding(student, data_root, C, in_channels, device)
+        embA = get_population_embeddings(A)
+        embB = get_population_embeddings(B)
+        embC = get_population_embeddings(C)
 
-        if embA is None or embB is None or embC is None:
-            continue
+        if metric == "prototype":
 
-        dAB = torch.norm(embA - embB).item()
-        dAC = torch.norm(embA - embC).item()
-        dBC = torch.norm(embB - embC).item()
+            dAB = torch.norm(embA - embB).item()
+            dAC = torch.norm(embA - embC).item()
+            dBC = torch.norm(embB - embC).item()
+
+        else:
+
+            dAB = mean_emd_numpy(embA, embB)
+            dAC = mean_emd_numpy(embA, embC)
+            dBC = mean_emd_numpy(embB, embC)
 
         if case == 1:
             is_valid = (dBC < dAB) and (dBC < dAC)
@@ -150,8 +206,6 @@ def compute_expert_annotation_metric(
         total += 1
         if is_valid:
             valid += 1
-
-        #print(total, is_valid, 100.0 * valid / total)
 
     if total == 0:
         return 0.0

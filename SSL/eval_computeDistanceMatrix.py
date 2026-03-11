@@ -2,7 +2,7 @@ import os
 import time
 import math
 import multiprocessing
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from scipy.stats import wasserstein_distance
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from Dataset.data_loader import PopulationDataset
 from SSL.model import create_vit_small_backbone, DINOHead, DINOStudent
 from SSL.utils import ensure_dir
 
@@ -121,63 +122,27 @@ def load_drug_list(csv_path: str) -> List[str]:
 
 
 #######################################################################################################
-# MAP DRUG -> FOLDER
-#######################################################################################################
-def get_npy_folder_from_drug(drug_name: str, cfg: Dict) -> Optional[str]:
-
-    df = pd.read_csv(cfg["label_path"], header=None, dtype=str)
-
-    matches = df[df.iloc[:, 2].str.strip() == drug_name.strip()]
-    if len(matches) == 0:
-        return None
-
-    plate = matches.iloc[0, 0].strip()
-    well  = matches.iloc[0, 1].strip()
-
-    path = os.path.join(cfg["data_root"], plate, f"{well}.npy")
-
-    return path if os.path.isfile(path) else None
-
-
-#######################################################################################################
 # EMBEDDING COMPUTATION
 #######################################################################################################
 @torch.no_grad()
-def compute_embeddings_for_well(
+def compute_embeddings_for_population(
     student,
-    npy_path,
-    in_channels: str,
+    population_tensor,
     device="cuda",
     batch_size=128,
 ):
 
-    in_channels = in_channels.lower()
+    if population_tensor.ndim != 4:
+        raise ValueError(f"Expected (N,C,96,96), got {tuple(population_tensor.shape)}")
 
-    channel_map = {
-        "egfp": [0],
-        "dapi": [1],
-        "both": [0, 1],
-    }
-
-    chans = channel_map[in_channels]
-
-    try:
-        data = np.load(npy_path, mmap_mode="r")   # (N,2,96,96)
-    except Exception:
+    if population_tensor.shape[0] == 0:
         return torch.empty(0, student.backbone.num_features)
-
-    N = data.shape[0]
 
     out = []
 
-    for i in range(0, N, batch_size):
+    for i in range(0, population_tensor.shape[0], batch_size):
 
-        arr = data[i:i+batch_size]       # (B,2,96,96)
-        arr = arr[:, chans]              # (B,C,96,96)
-
-        batch = torch.from_numpy(np.asarray(arr)).float()
-        batch = batch.to(device, non_blocking=True)
-
+        batch = population_tensor[i:i + batch_size].to(device, non_blocking=True)
         z = student.backbone(batch)
         out.append(z.cpu())
 
@@ -315,19 +280,18 @@ def _get_base_dir_from_file() -> str:
     return base_dir
 
 
-def _select_subset_drugs(cfg: Dict, subset: str) -> Tuple[List[str], str]:
+def _select_subset_csv(cfg: Dict, subset: str) -> Tuple[str, str]:
     subset = str(subset).lower().strip()
+
     if subset in {"callibration", "calibration", "callib"}:
         if "callibration_path" not in cfg:
             raise KeyError("cfg['callibration_path'] is required for subset='callibration'")
-        subset_drugs = load_drug_list(cfg["callibration_path"])
-        suffix = "_callibration"
-    elif subset in {"all", "entire", "full", "labels", "label"}:
-        subset_drugs = load_drug_list(cfg["label_path"])
-        suffix = ""
-    else:
-        raise ValueError(f"Invalid subset={subset}")
-    return subset_drugs, suffix
+        return cfg["callibration_path"], "_callibration"
+
+    if subset in {"all", "entire", "full", "labels", "label"}:
+        return cfg["label_path"], ""
+
+    raise ValueError(f"Invalid subset={subset}")
 
 
 def _metric_tag(metric: str) -> str:
@@ -371,99 +335,73 @@ def evaluate_computeDistanceMatrix(
     if metric not in {"emd", "prototype"}:
         raise ValueError(f"Invalid metric={metric}")
 
-    subset_drugs, subset_suffix = _select_subset_drugs(cfg, subset)
+    subset_csv, subset_suffix = _select_subset_csv(cfg, subset)
     metric_tag = _metric_tag(metric)
 
     student = load_trained_student(ckpt, cfg, device=device)
 
-    emb_cache_path = os.path.join(results_root, f"cached_embeddings_{in_channels}.pt")
+    dataset = PopulationDataset(
+        root_dir=cfg["data_root"],
+        wells_csv=subset_csv,
+        in_channels=in_channels,
+    )
 
-    # ======================================================================
-    # 1) BUILD ALL VALID DRUGS (FROM LABELS, WITH EXISTING FOLDERS)
-    # ======================================================================
-    if subset == "callibration":
-        all_label_drugs = subset_drugs
-    else:
-        all_label_drugs = load_drug_list(cfg["label_path"])
-
-    all_valid_drugs = []
-    folder_list = []
-    for drug in all_label_drugs:
-        folder = get_npy_folder_from_drug(drug, cfg)
-        if folder is not None:
-            all_valid_drugs.append(drug)
-            folder_list.append(folder)
-
-    # ======================================================================
-    # 2) SUBSET FILTERING
-    # ======================================================================
-    valid_drugs = [d for d in subset_drugs if d in all_valid_drugs]
+    valid_drugs = [drug for _, drug in dataset.samples]
     D = len(valid_drugs)
 
     if D == 0:
         raise RuntimeError("No valid drugs found for the requested subset.")
 
-    # ======================================================================
-    # 3) EMBEDDING CACHE (FOR ALL VALID DRUGS)
-    # ======================================================================
+    emb_cache_path = os.path.join(
+        results_root,
+        f"cached_embeddings_{in_channels}{subset_suffix}.pt"
+    )
 
-    print("Computing embeddings...")   
+    print("Computing embeddings...")
 
     cache_ok = False
-    embeddings = None
-    q_cls = None
+    class_embeddings = None
 
     if os.path.isfile(emb_cache_path):
         cache = torch.load(emb_cache_path, map_location="cpu")
-        embeddings = cache.get("embeddings", None)
-        q_cls = cache.get("q_cls", None)
-        cached_drugs = cache.get("all_valid_drugs", None)
+        cached_drugs = cache.get("valid_drugs", None)
+        cached_embeddings = cache.get("class_embeddings", None)
 
-        if embeddings is not None and q_cls is not None and cached_drugs is not None:
-            if list(cached_drugs) == list(all_valid_drugs):
+        if cached_drugs is not None and cached_embeddings is not None:
+            if list(cached_drugs) == list(valid_drugs):
+                class_embeddings = {
+                    i: cached_embeddings[i].numpy() if isinstance(cached_embeddings[i], torch.Tensor) else cached_embeddings[i]
+                    for i in range(len(valid_drugs))
+                }
                 cache_ok = True
 
     if not cache_ok:
-        all_embeddings = []
-        q_cls_list = []
+        class_embeddings = {}
+        cached_embeddings = {}
 
-        for global_idx, folder in enumerate(folder_list):
-            Z = compute_embeddings_for_well(
+        for cls_idx in range(len(dataset)):
+            population_tensor, drug = dataset[cls_idx]
+
+            Z = compute_embeddings_for_population(
                 student,
-                folder,
-                in_channels=in_channels,
+                population_tensor,
                 device=device,
                 batch_size=batch_size,
             )
-            all_embeddings.append(Z)
-            q_cls_list.extend([global_idx] * Z.shape[0])
 
-        if len(all_embeddings) == 0:
-            raise RuntimeError("No embeddings computed (no .npy files found).")
-
-        embeddings = torch.cat(all_embeddings, dim=0).cpu()
-        q_cls = np.asarray(q_cls_list, dtype=np.int32)
+            class_embeddings[cls_idx] = Z.numpy()
+            cached_embeddings[cls_idx] = Z.cpu()
 
         torch.save(
-            {"embeddings": embeddings, "q_cls": q_cls, "all_valid_drugs": all_valid_drugs},
+            {
+                "valid_drugs": valid_drugs,
+                "class_embeddings": cached_embeddings,
+            },
             emb_cache_path,
         )
 
-    # ======================================================================
-    # 4) BUILD CLASS EMBEDDINGS FOR SUBSET
-    # ======================================================================
-    emb_np = embeddings.numpy()
-    subset_indices = [all_valid_drugs.index(d) for d in valid_drugs]
-    unique_classes = list(range(len(subset_indices)))
+    unique_classes = list(range(D))
 
-    class_embeddings = {}
-    for local_cls, global_cls in enumerate(subset_indices):
-        mask = (q_cls == global_cls)
-        class_embeddings[local_cls] = emb_np[mask]
-
-    # ======================================================================
-    # 5) PAIRWISE DISTANCES (HYBRID)
-    # ======================================================================
     total_pairs = int(D * (D - 1) / 2)
     global_counter = multiprocessing.Value("i", 0)
     start_time = time.time()
@@ -498,9 +436,6 @@ def evaluate_computeDistanceMatrix(
     for p in processes:
         p.join()
 
-    # ======================================================================
-    # 6) MERGE BLOCKS
-    # ======================================================================
     Dmat = np.zeros((D, D), dtype=np.float32)
 
     for pid in range(int(n_processes)):
