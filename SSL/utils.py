@@ -171,6 +171,8 @@ def compute_expert_annotation_metric(
 
     if total == 0:
         return 0.0
+    
+    print("Total annotations used:", total)
 
     return 100.0 * valid / total
 
@@ -348,7 +350,7 @@ def compute_dapi_ratio(dataset):
     print("DMSO:", dmso_mean)
     print("SCR :", scr_mean)
     print("DMSO/SCR ratio:", dmso_mean / scr_mean)
-    
+
 
 @torch.no_grad()
 def visualize_population_samples(dataset, cells_per_row=10, channel_display="both"):
