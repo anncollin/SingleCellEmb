@@ -257,7 +257,7 @@ class PopulationDataset(Dataset):
             #####################################################"
             #arr[:, 1] = arr[:, 1] * 0.0  # DAPI only (previous)
             arr[:, 1] = arr[:, 1] * 0.55  # DAPI only
-            arr[:, 0] = arr[:, 0] * 0.7  # EGFP only
+            arr[:, 0] = arr[:, 0] * 0.85  # EGFP only
             
 
             #####################################################"
