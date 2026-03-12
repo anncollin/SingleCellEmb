@@ -78,6 +78,21 @@ def compute_expert_annotation_metric(
         in_channels=in_channels,
     )
 
+    # ------------------------------------------------------------------
+    # visualize some population samples
+    # ------------------------------------------------------------------
+    from SSL.utils import visualize_population_samples
+    
+    """
+    dataset = PopulationDataset(
+        root_dir=cfg["data_root"],
+        wells_csv=cfg["label_path"],
+        in_channels=in_channels,
+    )
+    """
+    #visualize_population_samples(dataset)
+    # ------------------------------------------------------------------
+
     well_index = {}
     for i, (path, drug) in enumerate(dataset.samples):
         plate = os.path.basename(os.path.dirname(path))
@@ -97,14 +112,14 @@ def compute_expert_annotation_metric(
                 return None
 
             tensor, _ = dataset[idx]
-            tensor = tensor.to(device)
+            tensor    = tensor.to(device)
 
             feats = []
             batch_size = 512
 
             for i in range(0, tensor.shape[0], batch_size):
                 batch = tensor[i:i+batch_size]
-                z = student.backbone(batch)
+                z     = student.backbone(batch)
                 feats.append(z.cpu())
 
             feats = torch.cat(feats, dim=0)
@@ -148,10 +163,12 @@ def compute_expert_annotation_metric(
             continue
 
         if metric == "prototype":
-
-            dAB = torch.norm(embA - embB).item()
-            dAC = torch.norm(embA - embC).item()
-            dBC = torch.norm(embB - embC).item()
+            #dAB = torch.norm(embA - embB).item()
+            #dAC = torch.norm(embA - embC).item()
+            #dBC = torch.norm(embB - embC).item()
+            dAB = 1 - torch.nn.functional.cosine_similarity(embA, embB, dim=0).item()
+            dAC = 1 - torch.nn.functional.cosine_similarity(embA, embC, dim=0).item()
+            dBC = 1 - torch.nn.functional.cosine_similarity(embB, embC, dim=0).item()
 
         else:
 

@@ -17,21 +17,6 @@ def evaluate_expertAnnotation(
     experiment_name = cfg["experiment_name"]
     in_channels = cfg.get("in_channels", "both")
 
-    # ------------------------------------------------------------------
-    # visualize some population samples
-    # ------------------------------------------------------------------
-    """
-    from Dataset.data_loader import PopulationDataset
-    from SSL.utils import visualize_population_samples
-    dataset = PopulationDataset(
-        root_dir=cfg["data_root"],
-        wells_csv=cfg["label_path"],
-        in_channels=in_channels,
-    )
-    visualize_population_samples(dataset)
-    """
-    # ------------------------------------------------------------------
-
     base_dir = os.getcwd().replace("/Todo_List", "")
     results_root = os.path.join(base_dir, "Results", experiment_name)
 
