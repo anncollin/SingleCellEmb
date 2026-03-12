@@ -160,7 +160,7 @@ def compute_embeddings_for_population(
 def mean_emd_numpy(
     emb_A: np.ndarray,
     emb_B: np.ndarray,
-    normalize: bool = False,
+    normalize: bool = True,
 ) -> float:
 
     if emb_A.size == 0 or emb_B.size == 0:
@@ -182,7 +182,7 @@ def mean_emd_numpy(
 def prototype_distance_numpy(
     emb_A: np.ndarray,
     emb_B: np.ndarray,
-    normalize: bool = False,
+    normalize: bool = True,
 ) -> float:
 
     if emb_A.size == 0 or emb_B.size == 0:
@@ -195,8 +195,19 @@ def prototype_distance_numpy(
         proto_A = F.normalize(torch.from_numpy(proto_A[None, :]), p=2, dim=1).numpy()[0]
         proto_B = F.normalize(torch.from_numpy(proto_B[None, :]), p=2, dim=1).numpy()[0]
 
-    diff = proto_A - proto_B
-    return float(np.sqrt(np.sum(diff * diff)))
+    #diff = proto_A - proto_B
+    #return float(np.sqrt(np.sum(diff * diff)))
+
+    dot = np.sum(proto_A * proto_B)
+    norm_A = np.sqrt(np.sum(proto_A * proto_A))
+    norm_B = np.sqrt(np.sum(proto_B * proto_B))
+
+    if norm_A == 0 or norm_B == 0:
+        return float("nan")
+
+    cosine_similarity = dot / (norm_A * norm_B)
+
+    return float(1.0 - cosine_similarity)
 
 
 #######################################################################################################
