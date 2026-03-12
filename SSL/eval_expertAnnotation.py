@@ -20,7 +20,6 @@ def evaluate_expertAnnotation(
     # ------------------------------------------------------------------
     # visualize some population samples
     # ------------------------------------------------------------------
-    """
     from Dataset.data_loader import PopulationDataset
     from SSL.utils import visualize_population_samples
     dataset = PopulationDataset(
@@ -29,8 +28,7 @@ def evaluate_expertAnnotation(
         in_channels=in_channels,
     )
 
-    visualize_population_samples(dataset)
-    """
+    #visualize_population_samples(dataset)
     # ------------------------------------------------------------------
 
     base_dir = os.getcwd().replace("/Todo_List", "")
