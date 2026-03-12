@@ -28,8 +28,8 @@ def evaluate_expertAnnotation(
         wells_csv=cfg["label_path"],
         in_channels=in_channels,
     )
+    visualize_population_samples(dataset)
     """
-    #visualize_population_samples(dataset)
     # ------------------------------------------------------------------
 
     base_dir = os.getcwd().replace("/Todo_List", "")
