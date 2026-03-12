@@ -142,7 +142,7 @@ def main():
 
         if do_eval: 
             evaluate_expertAnnotation(cfg=cfg, metric="prototype")
-            evaluate_computeDistanceMatrix(cfg, subset="callibration", metric="prototype")
+            evaluate_computeDistanceMatrix(cfg, subset="all", metric="prototype")
 
 
 if __name__ == "__main__":
