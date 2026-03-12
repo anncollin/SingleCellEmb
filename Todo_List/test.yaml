@@ -7,18 +7,23 @@ in_channels: both
 # ViT / DINO settings
 patch_size: 8
 out_dim: 256
-architecture: small  
+architecture: tiny  
 
 # Training
 batch_size: 8
-epochs: 5
+epochs: 2
 learning_rate: 1e-4
 weight_decay: 0.05
 num_workers: 0
 
 # Dataset sampling
-cells_per_well: 512       # number of cells sampled per well per epoch
+cells_per_well: 10       # number of cells sampled per well per epoch
 wells_csv: callibration  # null, unique_drugs
+
+# Batch correction for SiRNA drugs 
+zoom_factor : 1.252227
+brightness_dapi : 0.479059
+brightness_egfp : 0.780679
 
 # DINO Multi-crop
 global_crops_scale: [0.7, 0.9]

@@ -3,45 +3,27 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import pandas as pd
-
+import cv2
 
 #######################################################################################################
 # CELL DATASET
 # ----------------------------------------------------------------------------------------------------
 # Dataset used for self-supervised training (DINO).
-#
-# This dataset loads wells stored as `.npy` files containing cell populations with shape:
-#
-#     (N_cells, 2, 96, 96)
-#
-# where:
-#     channel 0 = EGFP
-#     channel 1 = DAPI
-#
-# Each dataset sample corresponds to **one randomly selected cell** from a well.
-# The random cell selection is performed at every `__getitem__` call.
-#
-# The dataset therefore behaves as a large pool of cells sampled across wells.
-#
-# Optional features:
-#     - Restrict wells using a CSV file (e.g. unique_drugs.csv or callibration.csv)
-#     - Sample a fixed number of cells per well (`cells_per_well`)
-#     - Select input channels (EGFP, DAPI, or both)
-#     - Apply augmentations through `transform`
-#
-# This dataset is intended for **training** where stochastic sampling and
-# data augmentation are required.
 #######################################################################################################
 
 class CellDataset(Dataset):
 
+    ###################################################################################################
+    # INITIALIZATION
+    ###################################################################################################
     def __init__(
         self,
         root_dir,
         transform=None,
         cells_per_well=None,
         wells_csv=None,
-        in_channels="both"
+        in_channels="both",
+        cfg=None
     ):
         super().__init__()
 
@@ -49,6 +31,7 @@ class CellDataset(Dataset):
         self.transform = transform
         self.cells_per_well = cells_per_well
         self.in_channels = in_channels.lower()
+        self.cfg = cfg or {}
 
         assert self.in_channels in {"egfp", "dapi", "both"}
 
@@ -58,6 +41,12 @@ class CellDataset(Dataset):
             "both": [0, 1],
         }
 
+        # -------------------- batch correction parameters --------------------
+        self.zoom_factor     = self.cfg.get("zoom_factor", None)
+        self.brightness_dapi = self.cfg.get("brightness_dapi", None)
+        self.brightness_egfp = self.cfg.get("brightness_egfp", None)
+
+        # -------------------- discover all wells --------------------
         all_wells = []
         for r, _, files in os.walk(root_dir):
             for f in files:
@@ -67,6 +56,7 @@ class CellDataset(Dataset):
         if len(all_wells) == 0:
             raise RuntimeError(f"No .npy files found in {root_dir}")
 
+        # -------------------- optional CSV filtering --------------------
         if wells_csv is not None:
 
             if wells_csv == "unique_drugs":
@@ -104,6 +94,7 @@ class CellDataset(Dataset):
 
         print(f"[CellDataset] Using {len(self.npy_files)} wells")
 
+        # -------------------- sampling strategy --------------------
         if cells_per_well is None:
             self.index_list = self.npy_files
         else:
@@ -112,27 +103,60 @@ class CellDataset(Dataset):
                 for _ in range(cells_per_well):
                     self.index_list.append(p)
 
+    ###################################################################################################
+    # DATASET LENGTH
+    ###################################################################################################
     def __len__(self):
 
         return len(self.index_list)
 
+    ###################################################################################################
+    # GET ONE CELL
+    ###################################################################################################
     def __getitem__(self, idx):
 
+        # -------------------- load well --------------------
         path = self.index_list[idx]
-
         data = np.load(path, mmap_mode="r")
 
         if data.ndim != 4:
             raise ValueError(f"Expected (N,2,96,96), got {data.shape}")
 
+        # -------------------- random cell sampling --------------------
         i = np.random.randint(0, data.shape[0])
-
         arr = data[i]
 
+        # -------------------- channel selection --------------------
         arr = arr[self.channel_map[self.in_channels]]
 
+        # -------------------- batch correction for siRNA plates --------------------
+        if "siRNA" in path:
+
+            if self.brightness_dapi is not None and arr.shape[0] > 1:
+                arr[1] = arr[1] * self.brightness_dapi
+
+            if self.brightness_egfp is not None:
+                arr[0] = arr[0] * self.brightness_egfp
+
+            if self.zoom_factor is not None:
+
+                zoomed = np.stack([
+                    cv2.resize(arr[c], (0, 0), fx=self.zoom_factor, fy=self.zoom_factor, interpolation=cv2.INTER_LINEAR)
+                    for c in range(arr.shape[0])
+                ])
+
+                h, w = arr.shape[1:]
+                zh, zw = zoomed.shape[1:]
+
+                start_h = (zh - h) // 2
+                start_w = (zw - w) // 2
+
+                arr = zoomed[:, start_h:start_h+h, start_w:start_w+w]
+
+        # -------------------- convert to tensor --------------------
         tensor = torch.from_numpy(np.asarray(arr)).float()
 
+        # -------------------- optional augmentation --------------------
         if self.transform is not None:
             tensor = self.transform(tensor)
 
@@ -141,49 +165,25 @@ class CellDataset(Dataset):
 
 #######################################################################################################
 # POPULATION DATASET
-# ----------------------------------------------------------------------------------------------------
-# Dataset used for evaluation and embedding computation.
-#
-# This dataset loads the **entire population of cells from a well** stored as:
-#
-#     (N_cells, 2, 96, 96)
-#
-# Unlike `CellDataset`, this dataset does **not randomly sample cells**.
-# Instead, it returns all cells from a well at once.
-#
-# Each sample returned by the dataset is:
-#
-#     tensor : (N_cells, C, 96, 96)
-#     drug   : str
-#
-# where:
-#     C depends on the selected input channels (EGFP, DAPI, or both).
-#
-# The drug label is read from a CSV file with columns:
-#
-#     plate, well_code, drug_name
-#
-# This dataset is typically used during evaluation to:
-#
-#     - compute embeddings for all cells in a well
-#     - aggregate them into population representations
-#     - compute distances between drug profiles
-#
-# No data augmentation or random sampling is performed.
 #######################################################################################################
 
 class PopulationDataset(Dataset):
 
+    ###################################################################################################
+    # INITIALIZATION
+    ###################################################################################################
     def __init__(
         self,
         root_dir,
         wells_csv=None,
-        in_channels="both"
+        in_channels="both",
+        cfg=None
     ):
         super().__init__()
 
         self.root_dir = root_dir
         self.in_channels = in_channels.lower()
+        self.cfg = cfg or {}
 
         assert self.in_channels in {"egfp", "dapi", "both"}
 
@@ -193,11 +193,14 @@ class PopulationDataset(Dataset):
             "both": [0, 1],
         }
 
+        # -------------------- batch correction parameters --------------------
+        self.zoom_factor = self.cfg.get("zoom_factor", None)
+        self.brightness_dapi = self.cfg.get("brightness_dapi", None)
+        self.brightness_egfp = self.cfg.get("brightness_egfp", None)
+
         self.samples = []
 
-        # -----------------------------------------
-        # CASE 1: CSV restriction (distance matrix)
-        # -----------------------------------------
+        # -------------------- case 1: CSV restriction --------------------
         if wells_csv is not None:
 
             df = pd.read_csv(wells_csv, header=None, dtype=str)
@@ -210,14 +213,13 @@ class PopulationDataset(Dataset):
                 if os.path.isfile(npy_path):
                     self.samples.append((npy_path, drug.strip()))
 
-        # -----------------------------------------
-        # CASE 2: scan whole dataset (annotations)
-        # -----------------------------------------
+        # -------------------- case 2: scan whole dataset --------------------
         else:
 
             for plate in os.listdir(root_dir):
 
                 plate_dir = os.path.join(root_dir, plate)
+
                 if not os.path.isdir(plate_dir):
                     continue
 
@@ -231,56 +233,58 @@ class PopulationDataset(Dataset):
         if len(self.samples) == 0:
             raise RuntimeError("No wells found for PopulationDataset")
 
+        print("[PopulationDataset] Using full cell populations")
 
-        print("!!!!!!!!!!!use of Population dataset with DA!!!!!!!")
-
+    ###################################################################################################
+    # DATASET LENGTH
+    ###################################################################################################
     def __len__(self):
 
         return len(self.samples)
 
+    ###################################################################################################
+    # GET ONE WELL
+    ###################################################################################################
     def __getitem__(self, idx):
 
+        # -------------------- load population --------------------
         path, drug = self.samples[idx]
-        data       = np.load(path, mmap_mode="r")
+        data = np.load(path, mmap_mode="r")
 
         if data.ndim != 4:
             raise ValueError(f"Expected (N,2,96,96), got {data.shape}")
 
-        arr    = data[:, self.channel_map[self.in_channels]]
+        # -------------------- channel selection --------------------
+        arr = data[:, self.channel_map[self.in_channels]]
 
-        ########################
-        import cv2
-
+        # -------------------- batch correction for siRNA plates --------------------
         if "siRNA" in path:
-            #####################################################"
-            # luminosity
-            #####################################################"
-            #arr[:, 1] = arr[:, 1] * 0.0  # DAPI only (previous)
-            arr[:, 1] = arr[:, 1] * 0.35  # DAPI only
-            arr[:, 0] = arr[:, 0] * 0.8  # EGFP only
-            
 
-            #####################################################"
-            # zoom
-            #####################################################"
-            zoom_factor = 1.18
+            if self.brightness_dapi is not None and arr.shape[1] > 1:
+                arr[:, 1] = arr[:, 1] * self.brightness_dapi
 
-            zoomed = np.stack([
-                np.stack([
-                    cv2.resize(arr[i, c], (0, 0), fx=zoom_factor, fy=zoom_factor, interpolation=cv2.INTER_LINEAR)
-                    for c in range(arr.shape[1])
+            if self.brightness_egfp is not None:
+                arr[:, 0] = arr[:, 0] * self.brightness_egfp
+
+            if self.zoom_factor is not None:
+
+                zoomed = np.stack([
+                    np.stack([
+                        cv2.resize(arr[i, c], (0, 0), fx=self.zoom_factor, fy=self.zoom_factor, interpolation=cv2.INTER_LINEAR)
+                        for c in range(arr.shape[1])
+                    ])
+                    for i in range(arr.shape[0])
                 ])
-                for i in range(arr.shape[0])
-            ])
 
-            h, w = arr.shape[2:]
-            zh, zw = zoomed.shape[2:]
+                h, w = arr.shape[2:]
+                zh, zw = zoomed.shape[2:]
 
-            start_h = (zh - h) // 2
-            start_w = (zw - w) // 2
+                start_h = (zh - h) // 2
+                start_w = (zw - w) // 2
 
-            arr = zoomed[:, :, start_h:start_h+h, start_w:start_w+w]
-        ########################
+                arr = zoomed[:, :, start_h:start_h+h, start_w:start_w+w]
+
+        # -------------------- convert to tensor --------------------
         tensor = torch.from_numpy(np.asarray(arr)).float()
 
         return tensor, drug

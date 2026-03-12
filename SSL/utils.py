@@ -66,6 +66,7 @@ def compute_expert_annotation_metric(
     data_root: str,
     annotations_csv: str,
     in_channels: str,
+    cfg: Dict,
     device="cuda",
     metric: str = "prototype",
 ):
@@ -76,14 +77,15 @@ def compute_expert_annotation_metric(
         root_dir=data_root,
         wells_csv=None,
         in_channels=in_channels,
+        cfg=cfg,
     )
 
     # ------------------------------------------------------------------
     # visualize some population samples
     # ------------------------------------------------------------------
+    """
     from SSL.utils import visualize_population_samples
     
-    """
     dataset = PopulationDataset(
         root_dir=cfg["data_root"],
         wells_csv=cfg["label_path"],
@@ -438,16 +440,6 @@ def visualize_population_samples(dataset, cells_per_row=10, channel_display="bot
             view = make_view(x, channel_display)
             axes[row + 2, col].imshow(view)
             axes[row + 2, col].axis("off")
-
-
-    # ---------------- ratio ----------------
-    dmso_mean = np.mean(dmso_ratios)
-    scr_mean  = np.mean(scr_ratios)
-
-    print("DAPI non-zero area")
-    print("DMSO:", dmso_mean)
-    print("SCR :", scr_mean)
-    print("DMSO/SCR ratio:", dmso_mean / scr_mean)
 
     # ---------------- labels ----------------
     axes[0,0].set_title("DMSO", fontsize=12)

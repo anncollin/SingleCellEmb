@@ -29,6 +29,7 @@ def evaluate_expertAnnotation(
         data_root=cfg["data_root"],
         annotations_csv="./SSL/annotations.csv",
         in_channels=in_channels,
+        cfg=cfg,
         device=device,
         metric=metric,
     )

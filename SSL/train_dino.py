@@ -35,6 +35,7 @@ def compute_all_metrics(
     teacher,
     dataloader,
     gpu_transform,
+    cfg,
     device="cuda",
     num_batches=5,
 ):
@@ -91,6 +92,7 @@ def compute_all_metrics(
         data_root=dataloader.dataset.root_dir,
         annotations_csv="./SSL/annotations.csv",
         in_channels=dataloader.dataset.in_channels,
+        cfg=cfg,
         device=device,
     )
     print("expert_score", expert_score)
@@ -169,7 +171,7 @@ def run_dino_experiment(cfg: Dict):
 
     if use_wandb:
         wandb.finish()
-        wandb.init(project="DINO_newNPY", name=cfg.get("experiment_name", "DINO_run"))
+        wandb.init(project="DINO_batchCorrection", name=cfg.get("experiment_name", "DINO_"))
         wandb.config.update(cfg, allow_val_change=True)
 
     data_root = cfg["data_root"]
@@ -219,6 +221,7 @@ def run_dino_experiment(cfg: Dict):
         in_channels=in_channels,
         cells_per_well=cfg.get("cells_per_well", None),
         wells_csv=cfg.get("wells_csv", None),
+        cfg=cfg,
     )
     dataloader = DataLoader(
         dataset,
@@ -306,6 +309,7 @@ def run_dino_experiment(cfg: Dict):
             teacher,
             dataloader,
             gpu_transform,
+            cfg,
             device
         )
 

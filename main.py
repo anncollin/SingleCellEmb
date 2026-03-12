@@ -140,23 +140,9 @@ def main():
             print("Starting TRAIN phase...")
             run_dino_experiment(cfg)
 
-            #print("Starting EVAL : Compute distance matrix [all + emd]")
-            #evaluate_computeDistanceMatrix(cfg, subset="all", metric="emd")
-
-
         if do_eval: 
-            #print("Starting EVAL : Compute distance matrix [all + prototype]")
-            #evaluate_computeDistanceMatrix(cfg, subset="callibration", metric="prototype")
-
-            # callibration or all 
-            # prototype or emd 
-            #print("Starting EVAL : Expert annotation [prototype]")
-
-            #evaluate_expertAnnotation(cfg=cfg, metric="prototype")
-            evaluate_computeDistanceMatrix(cfg, subset="all", metric="prototype")
-            #print("Starting EVAL : Expert annotation [EMD]")
-            #evaluate_expertAnnotation(cfg=cfg, metric="emd")
-
+            evaluate_expertAnnotation(cfg=cfg, metric="prototype")
+            evaluate_computeDistanceMatrix(cfg, subset="callibration", metric="prototype")
 
 
 if __name__ == "__main__":
