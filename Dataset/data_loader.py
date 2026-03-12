@@ -256,8 +256,8 @@ class PopulationDataset(Dataset):
             # luminosity
             #####################################################"
             #arr[:, 1] = arr[:, 1] * 0.0  # DAPI only (previous)
-            arr[:, 1] = arr[:, 1] * 0.55  # DAPI only
-            arr[:, 0] = arr[:, 0] * 0.85  # EGFP only
+            arr[:, 1] = arr[:, 1] * 0.35  # DAPI only
+            arr[:, 0] = arr[:, 0] * 0.8  # EGFP only
             
 
             #####################################################"
