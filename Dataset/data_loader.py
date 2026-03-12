@@ -247,6 +247,7 @@ class PopulationDataset(Dataset):
             raise ValueError(f"Expected (N,2,96,96), got {data.shape}")
 
         arr    = data[:, self.channel_map[self.in_channels]]
+        arr[:] = arr[:] * 0.0
 
         ########################
         import cv2
