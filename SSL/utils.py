@@ -39,7 +39,7 @@ from Dataset.data_loader import PopulationDataset
 def mean_emd_numpy(
     emb_A: np.ndarray,
     emb_B: np.ndarray,
-    normalize: bool = False,
+    normalize: bool = True,
 ) -> float:
 
     from scipy.stats import wasserstein_distance
