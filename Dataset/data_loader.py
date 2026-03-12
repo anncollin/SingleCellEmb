@@ -231,6 +231,9 @@ class PopulationDataset(Dataset):
         if len(self.samples) == 0:
             raise RuntimeError("No wells found for PopulationDataset")
 
+
+        print("!!!!!!!!!!!use of Population dataset with DA!!!!!!!")
+
     def __len__(self):
 
         return len(self.samples)
@@ -247,11 +250,19 @@ class PopulationDataset(Dataset):
 
         ########################
         import cv2
+
         if "siRNA" in path:
-            #arr[:, 1] = np.clip(arr[:, 1] * 1.0, 0.0, None)  # DAPI only
-            #arr[:, 0] = np.clip(arr[:, 1] * 1.0, 0.0, None)  # EGFP only
+            #####################################################"
+            # luminosity
+            #####################################################"
+            arr[:, 1] = arr[:, 1] * 0.55  # DAPI only
+            arr[:, 0] = arr[:, 0] * 0.7  # EGFP only
             
-            zoom_factor = 1.2
+
+            #####################################################"
+            # zoom
+            #####################################################"
+            zoom_factor = 1.18
 
             zoomed = np.stack([
                 np.stack([
