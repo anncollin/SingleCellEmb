@@ -247,8 +247,8 @@ class PopulationDataset(Dataset):
 
         ########################
         if "siRNA" in path:
-            arr[:, 1] = np.clip(arr[:, 1] * 0.4, 0.0, None)  # DAPI only
-            arr[:, 0] = np.clip(arr[:, 1] * 0.8, 0.0, None)  # DAPI only
+            arr[:, 1] = np.clip(arr[:, 1] * 0.6, 0.0, None)  # DAPI only
+            arr[:, 0] = np.clip(arr[:, 1] * 0.7, 0.0, None)  # EGFP only
         ########################
         tensor = torch.from_numpy(np.asarray(arr)).float()
 
