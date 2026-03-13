@@ -1,4 +1,4 @@
-experiment_name: "[DAPI+EGFP]tiny_brightness_batchAS-NoZoom_unique_150epochs"
+experiment_name: "[DAPI+EGFP]tiny_brightness_batchAS_unique_150epochs"
 
 # Dataset
 image_size: 96
@@ -14,14 +14,14 @@ batch_size: 64
 epochs: 150
 learning_rate: 1e-4
 weight_decay: 0.05
-num_workers: 0
+num_workers: 4
 
 # Dataset sampling
 cells_per_well: 8       # number of cells sampled per well per epoch
 wells_csv: unique_drugs  # null, unique_drugs
 
 # Batch correction for SiRNA drugs 
-zoom_factor : 1.0
+zoom_factor : 1.252227
 brightness_dapi : 0.479059
 brightness_egfp : 0.780679
 
