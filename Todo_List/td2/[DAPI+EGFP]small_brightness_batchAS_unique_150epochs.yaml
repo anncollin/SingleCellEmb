@@ -1,4 +1,4 @@
-experiment_name: "[DAPI+EGFP]tiny_brightness_batchAS_unique_150epochs"
+experiment_name: "[DAPI+EGFP]small_brightness_batchAS_unique_150epochs"
 
 # Dataset
 image_size: 96
