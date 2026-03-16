@@ -106,7 +106,8 @@ def load_trained_student(checkpoint_path: str, cfg: Dict, device: str = "cuda"):
 
     student = DINOStudent(backbone, head).to(device)
 
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    #ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    ckpt = torch.load(checkpoint_path, map_location=device)
     student.load_state_dict(ckpt["student_state_dict"], strict=True)
     student.eval()
 
