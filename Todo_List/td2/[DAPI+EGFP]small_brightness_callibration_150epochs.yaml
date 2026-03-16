@@ -21,9 +21,9 @@ cells_per_well: 512       # number of cells sampled per well per epoch
 wells_csv: callibration  # null, unique_drugs
 
 # Batch correction for SiRNA drugs 
-zoom_factor : None
-brightness_dapi : None
-brightness_egfp : None
+zoom_factor : 1.0
+brightness_dapi : 1.0
+brightness_egfp : 1.0
 
 # DINO Multi-crop
 global_crops_scale: [0.7, 0.9]
