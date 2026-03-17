@@ -1,4 +1,4 @@
-experiment_name: "[DAPI+EGFP]small_brightness_batchAS_callibration"
+experiment_name: "AA_[DAPI+EGFP]trainWithoutBatchCorrection"
 
 # Dataset
 image_size: 96
@@ -24,6 +24,9 @@ wells_csv: callibration  # null, unique_drugs
 zoom_factor : 1.252227
 brightness_dapi : 0.479059
 brightness_egfp : 0.780679
+#zoom_factor : 1.0
+#brightness_dapi : 1.0
+#brightness_egfp : 1.0
 
 # DINO Multi-crop
 global_crops_scale: [0.7, 0.9]
